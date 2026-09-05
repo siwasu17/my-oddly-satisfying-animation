@@ -106,6 +106,27 @@ density も同じ比率で薄めています。
 `resize()` で毎回 `setPixelRatio()` を入れ直し、さらに resize イベントを伴わない
 変化に備えて `matchMedia('(resolution: Ndppx)')` の change も監視しています。
 
+## ホーム画面に追加する（PWA）
+
+公開 URL をスマートフォンで開き、ブラウザの「ホーム画面に追加」を選ぶと、
+アドレスバーのない全画面で起動します。一度開いておけば、機内モードなど
+オフラインでもそのまま眺められます。
+
+- `public/manifest.webmanifest` — 名前・アイコン・起動時の表示モード。
+  `start_url` と `scope` を `"./"` にしてあるので、どのパスに置いても動きます。
+- `public/sw.js` — Service Worker。ビルド成果物が index.html とハッシュ付きの JS
+  だけなので、ファイル一覧を埋め込まず、install 時に HTML を読んで参照先の JS を
+  取りに行く方式にしています。HTML は network-first なので、新しいビルドを出せば
+  リロード 1 回で入れ替わります。
+- `src/pwa.ts` — 登録。開発サーバでキャッシュが邪魔にならないよう、本番だけ登録します。
+
+アイコンは画像ファイルを直接置かず、`src/palette.ts` と同じ配色で生成しています。
+色を変えたら作り直してください。
+
+```sh
+npm run icons      # public/icons/*.png を再生成
+```
+
 ## 構成
 
 ```
@@ -115,6 +136,7 @@ src/
 ├── palette.ts         全シーン共通の暖色パレット
 ├── audio.ts           Web Audio API による効果音（音声ファイルは持たない）
 ├── ui.ts              タブ・タイトル・キーボード操作
+├── pwa.ts             Service Worker の登録（オフライン対応）
 ├── types.ts           SceneModule インターフェース
 └── scenes/            シーン本体（1 ファイル 1 シーン）
 ```

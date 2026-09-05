@@ -3,6 +3,7 @@ import { createStage, disposeGroup, fitScale } from './stage.ts';
 import { createUi } from './ui.ts';
 import { createSfx } from './audio.ts';
 import { SCENES } from './scenes/index.ts';
+import { registerServiceWorker } from './pwa.ts';
 
 /** 自動切替の間隔（秒）。眺めている間に切り替わりすぎないよう長めに取る。 */
 const AUTO_SWITCH_SEC = 34;
@@ -184,3 +185,4 @@ function animate(): void {
 
 select(initialIndex());
 animate();
+registerServiceWorker();
