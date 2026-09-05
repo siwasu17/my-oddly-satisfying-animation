@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
+import { tone, tickers } from '../audio.ts';
 import { SURFACE, ember, drift } from '../palette.ts';
 
 const COUNT = 44; // 同時に走らせる雨だれの数
@@ -19,6 +20,9 @@ const seeds = new Float32Array(COUNT * 3);
 
 const smooth = (x: number): number => x * x * (3 - 2 * x);
 
+/** 滴ごとに、着水した回数を数える */
+let ticks = tickers(COUNT);
+
 /** 暗い水面に雫が落ち、輪が広がっては消えるのを延々と眺める。 */
 export const rainRings: SceneModule = {
   name: 'Rain Rings',
@@ -26,6 +30,8 @@ export const rainRings: SceneModule = {
   camera: { pos: [0, 9.5, 24], target: [0, 0.6, 0] },
 
   build(root) {
+    ticks = tickers(COUNT);
+
     // 疑似乱数。毎回同じ配置になるよう固定の漸化式で散らす
     let s = 0.317;
     for (let i = 0; i < COUNT; i++) {
@@ -106,5 +112,20 @@ export const rainRings: SceneModule = {
     drops.instanceMatrix.needsUpdate = true;
     if (rings.instanceColor) rings.instanceColor.needsUpdate = true;
     if (drops.instanceColor) drops.instanceColor.needsUpdate = true;
+  },
+
+  sound(t, _dt, sfx) {
+    // 着水は p が FALL をまたぐ瞬間。3 滴に 1 つだけ鳴らして雨脚をまばらにする
+    for (let i = 0; i < COUNT; i += 3) {
+      const phase = t / LIFE + seeds[i * 3 + 2]! - FALL;
+      for (let k = ticks[i]!(phase); k > 0; k--) {
+        sfx.drop(tone(6 + (i % 5)), {
+          gain: 0.42,
+          decay: 0.55,
+          pan: seeds[i * 3]! / AREA,
+          bend: 0.45,
+        });
+      }
+    }
   },
 };

@@ -73,10 +73,30 @@
     border-color: var(--accent); font-weight: 600;
   }
 
-  #help {
+  /* 効果音ボタンとキー説明を右下にまとめる */
+  #corner {
     position: fixed; right: 24px; bottom: 24px;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
+  }
+  #help {
     font-size: 11px; color: var(--dim); text-align: right;
     line-height: 1.8; pointer-events: none; user-select: none;
+  }
+
+  #sound {
+    appearance: none; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 7px;
+    border: 1px solid rgba(255,214,180,.14);
+    background: rgba(255,214,180,.05); color: var(--dim);
+    padding: 7px 14px; border-radius: 999px;
+    font-size: 12px; font-family: inherit; letter-spacing: .02em;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    transition: color .2s, border-color .2s, background .2s;
+  }
+  #sound:hover { color: var(--fg); border-color: rgba(255,214,180,.32); }
+  #sound.on {
+    color: #1a0f0a; background: var(--accent);
+    border-color: var(--accent); font-weight: 600;
   }
   kbd {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -88,6 +108,7 @@
     #title { font-size: 19px; }
     #help { display: none; }
     #hud { left: 16px; bottom: 16px; }
+    #corner { right: 16px; bottom: 16px; }
     #tabs { left: 16px; top: 16px; right: 16px; gap: 6px; }
     .tab { padding: 6px 11px; font-size: 11px; }
   }
@@ -105,9 +126,12 @@
   <p id="desc"></p>
 </div>
 
-<div id="help">
-  <div><kbd>1</kbd>–<kbd>9</kbd> シーン切替 / <kbd>←</kbd><kbd>→</kbd> 前後（全 12 シーン）</div>
-  <div><kbd>Space</kbd> 自動切替 ON/OFF・ドラッグで視点回転</div>
+<div id="corner">
+  <button id="sound" type="button" aria-pressed="false">♪ 効果音 OFF</button>
+  <div id="help">
+    <div><kbd>1</kbd>–<kbd>9</kbd> シーン切替 / <kbd>←</kbd><kbd>→</kbd> 前後（全 12 シーン）</div>
+    <div><kbd>Space</kbd> 自動切替 / <kbd>S</kbd> 効果音 ON/OFF・ドラッグで視点回転</div>
+  </div>
 </div>
 
 <script type="module" src="/src/main.ts"></script>

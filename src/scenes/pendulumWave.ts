@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
+import { tone, tickers } from '../audio.ts';
 import { emberColor } from '../palette.ts';
 
 const COUNT = 26;
@@ -15,6 +16,9 @@ const lines: THREE.Line[] = [];
 const lengths: number[] = [];
 const anchors: number[] = [];
 
+/** 振り子ごとに、真下を通った回数を数える */
+let ticks = tickers(COUNT);
+
 /**
  * 長さを L = K / n² で決めた振り子の列。
  * n が 1 ずつ増えるので、CYCLE 秒ごとに必ず全体が一列に戻る。
@@ -25,6 +29,8 @@ export const pendulumWave: SceneModule = {
   camera: { pos: [0, 6.0, 15], target: [0, 5.4, 0] },
 
   build(root) {
+    ticks = tickers(COUNT);
+
     balls.length = 0;
     lines.length = 0;
     lengths.length = 0;
@@ -86,6 +92,19 @@ export const pendulumWave: SceneModule = {
       pos.setXYZ(0, x, TOP, 0);
       pos.setXYZ(1, x, y, z);
       pos.needsUpdate = true;
+    }
+  },
+
+  sound(t, _dt, sfx) {
+    // 12 本おきに、真下を通る瞬間だけ鳴らす。全部鳴らすと音が団子になる
+    for (let i = 0; i < COUNT; i += 12) {
+      for (let k = ticks[i]!(((N_BASE + i) * t) / CYCLE); k > 0; k--) {
+        sfx.pluck(tone(4 + i / 2), {
+          gain: 0.26,
+          decay: 1.5,
+          pan: (anchors[i]! / SPAN) * 1.6,
+        });
+      }
     }
   },
 };
