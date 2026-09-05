@@ -46,6 +46,9 @@ export function createStage(container: HTMLElement): Stage {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   // 就寝前に眺める前提なので、全体の明るさは控えめに
   renderer.toneMappingExposure = 0.92;
+  // 透過（transmission）を使うのはピタゴラ装置の珠だけ。その 1 パスのために
+  // 毎フレーム全画面をもう一度描くのは重いので、半分の解像度で足りるようにする。
+  renderer.transmissionResolutionScale = 0.5;
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();

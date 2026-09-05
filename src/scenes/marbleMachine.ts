@@ -224,7 +224,7 @@ let gondolas: THREE.Group[] = [];
 let bars: THREE.Group[] = [];
 let barMats: THREE.MeshStandardMaterial[] = [];
 let balls: THREE.Mesh[] = [];
-let ballMat: THREE.MeshStandardMaterial;
+let ballMat: THREE.MeshPhysicalMaterial;
 /** 玉の自転。進んだ距離を積み上げるので、区間ごとの速さの違いがそのまま出る。 */
 const spin = new THREE.Quaternion();
 
@@ -264,11 +264,20 @@ export const marbleMachine: SceneModule = {
       roughness: 0.5,
       metalness: 0.7,
     });
-    ballMat = new THREE.MeshStandardMaterial({
-      color: emberColor(0.95),
-      emissive: emberColor(0.8),
-      roughness: 0.18,
-      metalness: 0.3,
+    // 玉は「光る球」ではなく「灯りをうっすら含んだガラス玉」にする。
+    // 発光をブルームの閾値より下に抑え、明るさではなく透過と艶で見せる。
+    ballMat = new THREE.MeshPhysicalMaterial({
+      color: emberColor(0.5),
+      emissive: emberColor(0.62),
+      roughness: 0.06,
+      metalness: 0,
+      transmission: 0.72,
+      thickness: BR * 1.5,
+      ior: 1.46,
+      attenuationColor: emberColor(0.55),
+      attenuationDistance: BR * 3,
+      clearcoat: 1,
+      clearcoatRoughness: 0.08,
     });
 
     // 通り道。板と昇降機の区間だけは仕掛けが玉を運ぶので、レールを敷かない。
@@ -411,9 +420,11 @@ export const marbleMachine: SceneModule = {
       }
       ball.position.copy(v);
     }
-    ember(color, 0.95, d, 0.05);
-    ballMat.color.copy(color);
+    ember(color, 0.62, d);
     ballMat.emissive.copy(color);
+    ember(color, 0.5, d);
+    ballMat.color.copy(color);
+    ballMat.attenuationColor.copy(color);
 
     // シーソー。玉が乗っている間に傾き、離れてからゆっくり戻る。
     const m = since(t, P_SEESAW);
