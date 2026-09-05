@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
+import { ember, drift } from '../palette.ts';
 
 const N = 54; // リングの本数
 const R = 8.5; // 球の半径
@@ -27,7 +28,7 @@ export const breathingRings: SceneModule = {
           roughness: 0.25,
           metalness: 0.5,
           emissive: new THREE.Color(),
-          emissiveIntensity: 0.9,
+          emissiveIntensity: 0.7,
         }),
       );
       mesh.rotation.x = Math.PI / 2; // トーラスを XZ 平面に寝かせる
@@ -37,7 +38,8 @@ export const breathingRings: SceneModule = {
   },
 
   update(t, dt) {
-    pivot.rotation.y += dt * 0.18;
+    pivot.rotation.y += dt * 0.14;
+    const d = drift(t);
 
     for (let i = 0; i < N; i++) {
       const th = (Math.PI * (i + 0.5)) / N; // 0..π（北極 → 南極）
@@ -50,9 +52,9 @@ export const breathingRings: SceneModule = {
       // 1本おきに逆回転させると、静止画でも縞が生きる
       mesh.rotation.z = th * 2 + t * 0.25 * (i % 2 ? 1 : -1);
 
-      color.setHSL((0.56 + n * 0.28 + t * 0.02) % 1, 0.85, 0.3 + n * 0.25);
+      ember(color, n * 0.82, d); // 就寝前に眩しくならない明るさへ抑える
       mesh.material.color.copy(color);
-      mesh.material.emissive.copy(color).multiplyScalar(0.55);
+      mesh.material.emissive.copy(color).multiplyScalar(0.45);
     }
   },
 };

@@ -62,6 +62,8 @@ export function createUi(scenes: readonly SceneModule[], handlers: UiHandlers): 
       title.textContent = scene.name;
       desc.textContent = scene.desc;
       buttons.forEach((b, i) => b.classList.toggle('on', i === index));
+      // 狭い画面ではタブが横スクロールするので、選択中のものを見える位置へ
+      buttons[index]?.scrollIntoView({ block: 'nearest', inline: 'center' });
     },
     setDesc(text) {
       desc.textContent = text;

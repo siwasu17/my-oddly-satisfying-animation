@@ -4,9 +4,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-
-/** 背景色。CSS 側の #05060b と揃えている。 */
-export const BG = 0x05060b;
+import { BG } from './palette.ts';
 
 /** 16:9 で見たときの霧の濃さ。画面比に応じて resize で薄める。 */
 const FOG_DENSITY = 0.018;
@@ -46,7 +44,8 @@ export function createStage(container: HTMLElement): Stage {
     powerPreference: 'high-performance',
   });
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  // 就寝前に眺める前提なので、全体の明るさは控えめに
+  renderer.toneMappingExposure = 0.92;
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
@@ -68,17 +67,17 @@ export function createStage(container: HTMLElement): Stage {
   controls.enablePan = false;
   controls.minDistance = 6;
   controls.maxPolarAngle = Math.PI * 0.495; // 地面より下へ潜らせない
-  controls.autoRotateSpeed = 0.35;
+  controls.autoRotateSpeed = 0.22;
 
-  // 上からの拡散光をベースに、左右から色違いのアクセントを当てる
-  scene.add(new THREE.HemisphereLight(0x9fd0ff, 0x101018, 1.1));
-  const key = new THREE.DirectionalLight(0xffffff, 1.6);
+  // 光源も青を避け、ろうそくの灯りのような色温度で揃える
+  scene.add(new THREE.HemisphereLight(0xffd0a8, 0x140d0c, 0.9));
+  const key = new THREE.DirectionalLight(0xffd9b4, 1.25);
   key.position.set(8, 18, 10);
   scene.add(key);
-  const rimA = new THREE.PointLight(0x4f7dff, 260, 120, 2);
+  const rimA = new THREE.PointLight(0xff9457, 200, 120, 2);
   rimA.position.set(-18, 10, -14);
   scene.add(rimA);
-  const rimB = new THREE.PointLight(0xff5fae, 200, 120, 2);
+  const rimB = new THREE.PointLight(0xd2708c, 150, 120, 2);
   rimB.position.set(18, 8, 14);
   scene.add(rimB);
 
@@ -87,9 +86,10 @@ export function createStage(container: HTMLElement): Stage {
   composer.addPass(
     new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
-      0.55, // strength
-      0.6, // radius
-      0.62, // threshold
+      // 明度を落とした分、にじみは弱く広くして輪郭をやわらげる
+      0.42, // strength
+      0.85, // radius
+      0.28, // threshold
     ),
   );
   composer.addPass(new OutputPass());

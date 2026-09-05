@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
+import { emberColor } from '../palette.ts';
 
 const COUNT = 26;
 const CYCLE = 30; // 全体が一列に揃うまでの秒数
@@ -33,7 +34,7 @@ export const pendulumWave: SceneModule = {
 
     const bar = new THREE.Mesh(
       new THREE.CylinderGeometry(0.1, 0.1, SPAN + 1.4, 16),
-      new THREE.MeshStandardMaterial({ color: 0x20242e, roughness: 0.4, metalness: 0.8 }),
+      new THREE.MeshStandardMaterial({ color: 0x241d1c, roughness: 0.4, metalness: 0.8 }),
     );
     bar.rotation.z = Math.PI / 2;
     bar.position.y = TOP;
@@ -45,13 +46,14 @@ export const pendulumWave: SceneModule = {
       lengths.push(k / (n * n));
       anchors.push(-SPAN / 2 + (SPAN * i) / (COUNT - 1));
 
-      const col = new THREE.Color().setHSL((0.55 + (i / COUNT) * 0.45) % 1, 0.8, 0.55);
+      // 左端を薔薇色、右端を琥珀色にして、揃った瞬間にグラデーションが出る
+      const col = emberColor(i / (COUNT - 1), 0, 0.05);
       const ball = new THREE.Mesh(
         ballGeo,
         new THREE.MeshStandardMaterial({
           color: col,
           emissive: col,
-          emissiveIntensity: 0.55,
+          emissiveIntensity: 0.4,
           roughness: 0.25,
           metalness: 0.3,
         }),
@@ -63,7 +65,7 @@ export const pendulumWave: SceneModule = {
       lineGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
       const line = new THREE.Line(
         lineGeo,
-        new THREE.LineBasicMaterial({ color: 0x6d7994, transparent: true, opacity: 0.45 }),
+        new THREE.LineBasicMaterial({ color: 0x7a6259, transparent: true, opacity: 0.4 }),
       );
       root.add(line);
       lines.push(line);

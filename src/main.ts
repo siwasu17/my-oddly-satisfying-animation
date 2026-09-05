@@ -3,10 +3,10 @@ import { createStage, disposeGroup, fitScale } from './stage.ts';
 import { createUi } from './ui.ts';
 import { SCENES } from './scenes/index.ts';
 
-/** 自動切替の間隔（秒） */
-const AUTO_SWITCH_SEC = 22;
+/** 自動切替の間隔（秒）。眺めている間に切り替わりすぎないよう長めに取る。 */
+const AUTO_SWITCH_SEC = 34;
 /** カメラが定位置へ移動しきるまでの秒数 */
-const CAM_TWEEN_SEC = 1.3;
+const CAM_TWEEN_SEC = 2.0;
 
 const stage = createStage(document.getElementById('app')!);
 const { scene, camera, controls, composer } = stage;

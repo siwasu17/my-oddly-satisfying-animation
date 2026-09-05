@@ -5,15 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Oddly Satisfying 3D — Three.js</title>
 <style>
+  /* 就寝前に眺める前提で、UI からも青い光を抜いている */
   :root {
-    --fg: #e8ecf5;
-    --dim: #8f9bb3;
-    --accent: #7fd7ff;
+    --bg: #080607;
+    --fg: #f0e2d6;
+    --dim: #a08a7d;
+    --accent: #ffb37a;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
-    background: #05060b;
+    background: var(--bg);
     color: var(--fg);
     font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue",
                  "Hiragino Sans", "Yu Gothic", sans-serif;
@@ -27,12 +29,12 @@
   #vignette {
     position: fixed; inset: 0; pointer-events: none;
     background: radial-gradient(ellipse at center,
-                rgba(0,0,0,0) 45%, rgba(0,0,0,.55) 100%);
+                rgba(0,0,0,0) 42%, rgba(6,4,5,.62) 100%);
   }
 
   #fade {
     position: fixed; inset: 0; pointer-events: none;
-    background: #05060b; opacity: 0;
+    background: var(--bg); opacity: 0;
     transition: opacity .35s ease;
   }
 
@@ -47,21 +49,27 @@
   }
   #desc { margin: 0; font-size: 13px; color: var(--dim); line-height: 1.6; }
 
+  /* 12 個あるので折り返さず 1 行に並べ、はみ出した分は横スクロールで見せる */
   #tabs {
-    position: fixed; left: 24px; top: 24px;
-    display: flex; gap: 8px; flex-wrap: wrap;
+    position: fixed; left: 24px; top: 24px; right: 24px;
+    display: flex; gap: 8px; flex-wrap: nowrap;
+    overflow-x: auto; scrollbar-width: none; padding-bottom: 4px;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent);
   }
+  #tabs::-webkit-scrollbar { display: none; }
   .tab {
-    appearance: none; border: 1px solid rgba(255,255,255,.14);
-    background: rgba(255,255,255,.05); color: var(--dim);
+    appearance: none; flex: 0 0 auto;
+    border: 1px solid rgba(255,214,180,.14);
+    background: rgba(255,214,180,.05); color: var(--dim);
     padding: 7px 14px; border-radius: 999px;
     font-size: 12px; font-family: inherit; cursor: pointer;
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
     transition: color .2s, border-color .2s, background .2s;
   }
-  .tab:hover { color: var(--fg); border-color: rgba(255,255,255,.3); }
+  .tab:hover { color: var(--fg); border-color: rgba(255,214,180,.32); }
   .tab.on {
-    color: #05060b; background: var(--accent);
+    color: #1a0f0a; background: var(--accent);
     border-color: var(--accent); font-weight: 600;
   }
 
@@ -72,7 +80,7 @@
   }
   kbd {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 10px; border: 1px solid rgba(255,255,255,.2);
+    font-size: 10px; border: 1px solid rgba(255,214,180,.2);
     border-radius: 4px; padding: 1px 5px; color: var(--fg);
   }
 
@@ -80,7 +88,7 @@
     #title { font-size: 19px; }
     #help { display: none; }
     #hud { left: 16px; bottom: 16px; }
-    #tabs { left: 16px; top: 16px; gap: 6px; }
+    #tabs { left: 16px; top: 16px; right: 16px; gap: 6px; }
     .tab { padding: 6px 11px; font-size: 11px; }
   }
 </style>
@@ -98,7 +106,7 @@
 </div>
 
 <div id="help">
-  <div><kbd>1</kbd>–<kbd>4</kbd> シーン切替 / <kbd>←</kbd><kbd>→</kbd> 前後</div>
+  <div><kbd>1</kbd>–<kbd>9</kbd> シーン切替 / <kbd>←</kbd><kbd>→</kbd> 前後（全 12 シーン）</div>
   <div><kbd>Space</kbd> 自動切替 ON/OFF・ドラッグで視点回転</div>
 </div>
 

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
+import { SURFACE, ember, drift } from '../palette.ts';
 
 const N = 46; // 1辺のバー本数
 const GAP = 0.66; // バーの間隔
@@ -27,7 +28,7 @@ export const waveLattice: SceneModule = {
     // 金属質の床。バーが薄く映り込んで奥行きが出る
     const floor = new THREE.Mesh(
       new THREE.CircleGeometry(N * GAP * 0.78, 96),
-      new THREE.MeshStandardMaterial({ color: 0x0a0c14, roughness: 0.25, metalness: 0.9 }),
+      new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.25, metalness: 0.9 }),
     );
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.02;
@@ -35,6 +36,7 @@ export const waveLattice: SceneModule = {
   },
 
   update(t) {
+    const hue = drift(t);
     const half = (N - 1) / 2;
     let i = 0;
     for (let a = 0; a < N; a++) {
@@ -53,7 +55,7 @@ export const waveLattice: SceneModule = {
         dummy.updateMatrix();
         mesh.setMatrixAt(i, dummy.matrix);
 
-        color.setHSL((0.6 - n * 0.32 + t * 0.02) % 1, 0.75, 0.22 + n * 0.35);
+        ember(color, n, hue);
         mesh.setColorAt(i, color);
       }
     }

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
+import { ember, drift } from '../palette.ts';
 
 const COUNT = 1800;
 const RADIUS = 15;
@@ -36,6 +37,7 @@ export const flipGarden: SceneModule = {
   },
 
   update(t) {
+    const d = drift(t);
     for (let i = 0; i < COUNT; i++) {
       const x = tiles[i * 3]!;
       const z = tiles[i * 3 + 1]!;
@@ -49,7 +51,7 @@ export const flipGarden: SceneModule = {
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
 
-      color.setHSL((0.52 + n * 0.3 + t * 0.015) % 1, 0.8, 0.25 + n * 0.34);
+      ember(color, n, d);
       mesh.setColorAt(i, color);
     }
     mesh.instanceMatrix.needsUpdate = true;
