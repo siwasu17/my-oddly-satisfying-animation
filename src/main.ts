@@ -74,6 +74,7 @@ const ui = createUi(SCENES, {
 });
 
 ui.showSound(soundOn);
+ui.showAutoPlay(autoPlay);
 
 // 前回 ON だった場合の復元。ブラウザは操作なしに音を出せないので、
 // AudioContext を作るのは最初のクリックかキー入力まで待つ。

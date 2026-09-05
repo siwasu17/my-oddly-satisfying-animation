@@ -18,6 +18,8 @@ export interface Ui {
   flash(): void;
   /** 効果音ボタンの見た目を現在の状態に合わせる */
   showSound(on: boolean): void;
+  /** 自動切替ボタンの見た目を現在の状態に合わせる */
+  showAutoPlay(on: boolean): void;
 }
 
 function el<T extends HTMLElement>(id: string): T {
@@ -32,6 +34,7 @@ export function createUi(scenes: readonly SceneModule[], handlers: UiHandlers): 
   const fade = el('fade');
   const tabs = el('tabs');
   const sound = el<HTMLButtonElement>('sound');
+  const auto = el<HTMLButtonElement>('auto');
 
   const buttons = scenes.map((scene, i) => {
     const b = document.createElement('button');
@@ -54,7 +57,19 @@ export function createUi(scenes: readonly SceneModule[], handlers: UiHandlers): 
     sound.classList.toggle('on', on);
   }
 
+  /** ボタンとキーの両方から呼ぶ。表示は必ずここを通して更新する。 */
+  function flipAutoPlay(): void {
+    showAutoPlay(handlers.toggleAutoPlay());
+  }
+
+  function showAutoPlay(on: boolean): void {
+    auto.textContent = on ? '⟳ 自動切替 ON' : '⟳ 自動切替 OFF';
+    auto.setAttribute('aria-pressed', String(on));
+    auto.classList.toggle('on', on);
+  }
+
   sound.addEventListener('click', flipSound);
+  auto.addEventListener('click', flipAutoPlay);
 
   window.addEventListener('keydown', (e) => {
     if (e.key >= '1' && e.key <= String(Math.min(scenes.length, 9))) {
@@ -67,10 +82,7 @@ export function createUi(scenes: readonly SceneModule[], handlers: UiHandlers): 
       flipSound();
     } else if (e.code === 'Space') {
       e.preventDefault();
-      const on = handlers.toggleAutoPlay();
-      desc.textContent = on
-        ? scenes[currentIndex]!.desc
-        : '自動切替：OFF（Space でもう一度 ON）';
+      flipAutoPlay();
     }
   });
 
@@ -95,5 +107,6 @@ export function createUi(scenes: readonly SceneModule[], handlers: UiHandlers): 
       }, 180);
     },
     showSound,
+    showAutoPlay,
   };
 }
