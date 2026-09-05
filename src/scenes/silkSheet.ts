@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
+import { tone, ticker } from '../audio.ts';
 import { ember, drift } from '../palette.ts';
 
 const W = 26; // 布の横幅
@@ -15,6 +16,10 @@ let base: Float32Array; // 平らな状態の頂点座標
 let pos: THREE.BufferAttribute;
 let col: THREE.BufferAttribute;
 
+/** いちばん大きなうねりの半周ぶんを数える */
+let tickGust = ticker();
+let gust = 0;
+
 /** 空中に浮かんだ絹が、ゆっくりとした大きなうねりで波打つ。 */
 export const silkSheet: SceneModule = {
   name: 'Silk Sheet',
@@ -22,6 +27,9 @@ export const silkSheet: SceneModule = {
   camera: { pos: [0, 16, 32], target: [0, 0, 0] },
 
   build(root) {
+    tickGust = ticker();
+    gust = 0;
+
     const geo = new THREE.PlaneGeometry(W, H, SEG_X, SEG_Y);
     geo.rotateX(-Math.PI / 2); // XZ 平面へ寝かせる
 
@@ -69,5 +77,23 @@ export const silkSheet: SceneModule = {
     pos.needsUpdate = true;
     col.needsUpdate = true;
     mesh.geometry.computeVertexNormals(); // 面の向きが変わるので毎フレーム取り直す
+  },
+
+  sound(t, _dt, sfx) {
+    // 打ち上げの音が無い代わりに、低い持続音をゆっくり上下させる
+    sfx.drone(tone(gust % 2 === 0 ? 0 : 2), 0.16 + 0.08 * Math.sin(t * 0.31));
+
+    // いちばん大きなうねり（約 10 秒周期）の半周ごとに衣ずれを送る
+    for (let k = tickGust((t * 0.62) / Math.PI); k > 0; k--) {
+      gust++;
+      sfx.air({
+        gain: 0.34,
+        decay: 3.2,
+        freq: 600,
+        q: 0.7,
+        sweep: 0.5,
+        pan: gust % 2 ? 0.5 : -0.5, // 左右を行き来して、布の上を風が渡る
+      });
+    }
   },
 };

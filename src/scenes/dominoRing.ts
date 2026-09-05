@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
+import { tone, tickers } from '../audio.ts';
 import { SURFACE, ember, drift } from '../palette.ts';
 
 const COUNT = 84; // 円周に並べる枚数
@@ -31,6 +32,9 @@ function tilt(p: number): number {
   return 0;
 }
 
+/** 牌ごとに、倒れ始めた回数を数える */
+let ticks = tickers(COUNT);
+
 /** 円環に並んだドミノが、倒れては静かに起き上がるのを繰り返す。 */
 export const dominoRing: SceneModule = {
   name: 'Domino Ring',
@@ -38,6 +42,8 @@ export const dominoRing: SceneModule = {
   camera: { pos: [0, 11, 22], target: [0, 0.8, 0] },
 
   build(root) {
+    ticks = tickers(COUNT);
+
     const geo = new THREE.BoxGeometry(TW, TH, TD);
     geo.translate(0, TH / 2, -TD / 2); // 倒れる側の底辺を回転軸にする
 
@@ -81,5 +87,19 @@ export const dominoRing: SceneModule = {
 
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  },
+
+  sound(t, _dt, sfx) {
+    // 3 枚に 1 つ、倒れ始める瞬間に木の音を置く
+    for (let i = 0; i < COUNT; i += 3) {
+      const u = i / COUNT;
+      for (let k = ticks[i]!(t / CYCLE - u); k > 0; k--) {
+        sfx.pluck(tone(8 + (i % 5)), {
+          gain: 0.3,
+          decay: 0.45, // 短く切ると、板が当たる音に近づく
+          pan: Math.cos(u * Math.PI * 2) * 0.8,
+        });
+      }
+    }
   },
 };

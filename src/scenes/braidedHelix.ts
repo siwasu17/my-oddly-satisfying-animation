@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
+import { tone, tickers } from '../audio.ts';
 import { ember, drift } from '../palette.ts';
 
 const STRANDS = 3;
@@ -16,6 +17,9 @@ const color = new THREE.Color();
 
 let mesh: THREE.InstancedMesh;
 
+/** 紐ごとに、いちばん外へ出た回数を数える */
+let ticks = tickers(STRANDS);
+
 /** 3 本の紐が互いをくぐりながら、ゆっくり編まれていく。 */
 export const braidedHelix: SceneModule = {
   name: 'Braided Helix',
@@ -23,6 +27,8 @@ export const braidedHelix: SceneModule = {
   camera: { pos: [0, 6, 22], target: [0, 0, 0] },
 
   build(root) {
+    ticks = tickers(STRANDS);
+
     mesh = new THREE.InstancedMesh(
       new THREE.SphereGeometry(0.3, 16, 12),
       new THREE.MeshStandardMaterial({ roughness: 0.25, metalness: 0.45 }),
@@ -61,5 +67,15 @@ export const braidedHelix: SceneModule = {
 
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  },
+
+  sound(t, _dt, sfx) {
+    // 紐が芯から最も外へ膨らむ瞬間。3 本が順に来るので、ゆるい分散和音になる
+    for (let k = 0; k < STRANDS; k++) {
+      const phase = (t * SPEED) / Math.PI + (2 * k) / STRANDS - 0.25;
+      for (let n = ticks[k]!(phase); n > 0; n--) {
+        sfx.pluck(tone(3 + k * 2), { gain: 0.34, decay: 3.4, pan: (k - 1) * 0.55 });
+      }
+    }
   },
 };

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
+import { tone, tickers } from '../audio.ts';
 import { ember, drift } from '../palette.ts';
 
 const STRANDS = 32; // 垂らす紐の本数
@@ -19,6 +20,9 @@ let mesh: THREE.InstancedMesh;
 /** 紐ごとの [x, z] */
 const anchors = new Float32Array(STRANDS * 2);
 
+/** 紐ごとに、振り切って戻った回数を数える */
+let ticks = tickers(STRANDS);
+
 /** 暗がりに下がった珠のれん。見えない風が端から端へ通り抜けていく。 */
 export const curtainWave: SceneModule = {
   name: 'Curtain Wave',
@@ -26,6 +30,8 @@ export const curtainWave: SceneModule = {
   camera: { pos: [0, 0.6, 26], target: [0, 0.2, 0] },
 
   build(root) {
+    ticks = tickers(STRANDS);
+
     const half = (STRANDS - 1) / 2;
     for (let s = 0; s < STRANDS; s++) {
       const a = (s - half) * STEP;
@@ -74,5 +80,19 @@ export const curtainWave: SceneModule = {
 
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  },
+
+  sound(t, _dt, sfx) {
+    // 4 本おきに、珠が振り切る瞬間を鳴らす。風が横へ抜けていくように聞こえる
+    for (let s = 0; s < STRANDS; s += 4) {
+      const phase = (t * 1.05 - s * 0.3) / (Math.PI * 2);
+      for (let k = ticks[s]!(phase); k > 0; k--) {
+        sfx.pluck(tone(9 + (s % 5)), {
+          gain: 0.28,
+          decay: 3.6, // 触れ合った珠が長く余韻を残す
+          pan: anchors[s * 2]! / (ARC * 0.6),
+        });
+      }
+    }
   },
 };

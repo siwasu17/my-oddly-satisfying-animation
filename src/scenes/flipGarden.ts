@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
+import { tone, ticker } from '../audio.ts';
 import { ember, drift } from '../palette.ts';
 
 const COUNT = 1800;
@@ -14,6 +15,11 @@ let mesh: THREE.InstancedMesh;
 /** タイルごとの [x, z, 中心からの距離] */
 const tiles = new Float32Array(COUNT * 3);
 
+/** めくれの波 1 周ぶんと、その 1/4 ごとの拍 */
+let tickTurn = ticker();
+let tickBeat = ticker();
+let beat = 0;
+
 /** ひまわりの種の並び（黄金角スパイラル）にタイルを敷き、外へ向かって順にめくる。 */
 export const flipGarden: SceneModule = {
   name: 'Flip Garden',
@@ -21,6 +27,10 @@ export const flipGarden: SceneModule = {
   camera: { pos: [0, 16, 26], target: [0, 0.6, 0] },
 
   build(root) {
+    tickTurn = ticker();
+    tickBeat = ticker();
+    beat = 0;
+
     for (let i = 0; i < COUNT; i++) {
       const r = Math.sqrt((i + 0.5) / COUNT) * RADIUS;
       const a = i * GOLDEN_ANGLE;
@@ -56,5 +66,19 @@ export const flipGarden: SceneModule = {
     }
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  },
+
+  sound(t, _dt, sfx) {
+    const phase = t * 0.2387; // めくれの波 1 周（約 4.2 秒）を 1 とする
+
+    // タイルが一斉に返る音。紙を撫でるようなノイズを薄く敷く
+    for (let k = tickTurn(phase); k > 0; k--) {
+      sfx.air({ gain: 0.3, decay: 1.8, freq: 900, q: 0.8, sweep: 0.45 });
+    }
+    for (let k = tickBeat(phase * 4); k > 0; k--) {
+      const deg = [0, 2, 4, 2][beat % 4]!;
+      beat++;
+      sfx.pluck(tone(5 + deg), { gain: 0.26, decay: 2.6, pan: Math.cos(beat) * 0.4 });
+    }
   },
 };

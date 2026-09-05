@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
+import { tone, ticker } from '../audio.ts';
 import { SURFACE, ember, drift } from '../palette.ts';
 
 const N = 46; // 1辺のバー本数
@@ -10,6 +11,12 @@ const color = new THREE.Color();
 
 let mesh: THREE.InstancedMesh;
 
+/** 波の山が通り過ぎた回数を数える。build のたびに作り直す。 */
+let tick = ticker();
+let step = 0;
+/** 鳴らす音程の並び。上って下りるので、聴いていても着地点がない。 */
+const ARP = [0, 1, 2, 3, 4, 3, 2, 1];
+
 /** 中心から円形に広がる正弦波で、格子状のバーを持ち上げる。 */
 export const waveLattice: SceneModule = {
   name: 'Wave Lattice',
@@ -17,6 +24,9 @@ export const waveLattice: SceneModule = {
   camera: { pos: [8, 19, 30], target: [0, 1.2, 0] },
 
   build(root) {
+    tick = ticker();
+    step = 0;
+
     const geo = new THREE.BoxGeometry(0.42, 1, 0.42);
     geo.translate(0, 0.5, 0); // 原点を底面へ移し、Y スケールだけで伸ばせるようにする
     const mat = new THREE.MeshStandardMaterial({ roughness: 0.32, metalness: 0.45 });
@@ -61,5 +71,18 @@ export const waveLattice: SceneModule = {
     }
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  },
+
+  sound(t, _dt, sfx) {
+    // 波の 1 周期を 6 つに割って鳴らすと、山が広がる速さと拍が合う
+    for (let k = tick(t * 1.81); k > 0; k--) {
+      const deg = ARP[step % ARP.length]!;
+      step++;
+      sfx.pluck(tone(7 + deg), {
+        gain: 0.32,
+        decay: 2.4,
+        pan: Math.sin(step * 1.1) * 0.5,
+      });
+    }
   },
 };

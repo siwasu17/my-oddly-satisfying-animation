@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
+import { tone, ticker } from '../audio.ts';
 import { ember, drift } from '../palette.ts';
 
 const COUNT = 70; // 輪の枚数
@@ -15,6 +16,10 @@ const color = new THREE.Color();
 
 let mesh: THREE.InstancedMesh;
 
+/** 輪が脇を通り過ぎた回数を数える */
+let tickPass = ticker();
+let pass = 0;
+
 /** 奥から手前へ流れてくる輪の回廊。霧に溶ける奥行きを眺め続けられる。 */
 export const lightCorridor: SceneModule = {
   name: 'Light Corridor',
@@ -22,6 +27,9 @@ export const lightCorridor: SceneModule = {
   camera: { pos: [0, 2.2, 17], target: [0, 0, -8] },
 
   build(root) {
+    tickPass = ticker();
+    pass = 0;
+
     const geo = new THREE.TorusGeometry(1, 0.05, 8, 128);
     mesh = new THREE.InstancedMesh(
       geo,
@@ -59,5 +67,23 @@ export const lightCorridor: SceneModule = {
 
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  },
+
+  sound(t, _dt, sfx) {
+    sfx.drone(tone(-5), 0.16); // 回廊に溜まった低い響き
+
+    // 輪が 2 枚に 1 度、脇を通り抜ける
+    for (let k = tickPass((t * SPEED) / (GAP * 2)); k > 0; k--) {
+      pass++;
+      sfx.air({
+        gain: 0.3,
+        decay: 1.4,
+        freq: 520,
+        q: 1.1,
+        sweep: 0.4, // 通り過ぎたあとほど低く落ちる
+        pan: pass % 2 ? 0.6 : -0.6,
+      });
+      if (pass % 4 === 0) sfx.pluck(tone(2), { gain: 0.26, decay: 3 });
+    }
   },
 };

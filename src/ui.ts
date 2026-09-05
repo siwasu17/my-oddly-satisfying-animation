@@ -5,6 +5,8 @@ export interface UiHandlers {
   select(index: number): void;
   /** 自動切替の ON/OFF を反転し、切替後の状態を返す */
   toggleAutoPlay(): boolean;
+  /** 効果音の ON/OFF を反転し、切替後の状態を返す */
+  toggleSound(): boolean;
 }
 
 export interface Ui {
@@ -14,6 +16,8 @@ export interface Ui {
   setDesc(text: string): void;
   /** 画面を一瞬だけ暗転させ、シーンの入れ替わりを隠す */
   flash(): void;
+  /** 効果音ボタンの見た目を現在の状態に合わせる */
+  showSound(on: boolean): void;
 }
 
 function el<T extends HTMLElement>(id: string): T {
@@ -27,6 +31,7 @@ export function createUi(scenes: readonly SceneModule[], handlers: UiHandlers): 
   const desc = el('desc');
   const fade = el('fade');
   const tabs = el('tabs');
+  const sound = el<HTMLButtonElement>('sound');
 
   const buttons = scenes.map((scene, i) => {
     const b = document.createElement('button');
@@ -38,6 +43,19 @@ export function createUi(scenes: readonly SceneModule[], handlers: UiHandlers): 
     return b;
   });
 
+  /** ボタンとキーの両方から呼ぶ。表示は必ずここを通して更新する。 */
+  function flipSound(): void {
+    showSound(handlers.toggleSound());
+  }
+
+  function showSound(on: boolean): void {
+    sound.textContent = on ? '♪ 効果音 ON' : '♪ 効果音 OFF';
+    sound.setAttribute('aria-pressed', String(on));
+    sound.classList.toggle('on', on);
+  }
+
+  sound.addEventListener('click', flipSound);
+
   window.addEventListener('keydown', (e) => {
     if (e.key >= '1' && e.key <= String(Math.min(scenes.length, 9))) {
       handlers.select(Number(e.key) - 1);
@@ -45,6 +63,8 @@ export function createUi(scenes: readonly SceneModule[], handlers: UiHandlers): 
       handlers.select(currentIndex + 1);
     } else if (e.key === 'ArrowLeft') {
       handlers.select(currentIndex - 1);
+    } else if (e.key === 's' || e.key === 'S') {
+      flipSound();
     } else if (e.code === 'Space') {
       e.preventDefault();
       const on = handlers.toggleAutoPlay();
@@ -74,5 +94,6 @@ export function createUi(scenes: readonly SceneModule[], handlers: UiHandlers): 
         fade.style.opacity = '0';
       }, 180);
     },
+    showSound,
   };
 }

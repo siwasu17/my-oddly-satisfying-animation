@@ -1,12 +1,15 @@
 import * as THREE from 'three';
 import { createStage, disposeGroup, fitScale } from './stage.ts';
 import { createUi } from './ui.ts';
+import { createSfx } from './audio.ts';
 import { SCENES } from './scenes/index.ts';
 
 /** 自動切替の間隔（秒）。眺めている間に切り替わりすぎないよう長めに取る。 */
 const AUTO_SWITCH_SEC = 34;
 /** カメラが定位置へ移動しきるまでの秒数 */
 const CAM_TWEEN_SEC = 2.0;
+/** 効果音の ON/OFF を覚えておく localStorage のキー */
+const SOUND_KEY = 'oddly:sound';
 
 const stage = createStage(document.getElementById('app')!);
 const { scene, camera, controls, composer } = stage;
@@ -16,6 +19,25 @@ let root: THREE.Group | null = null;
 let sceneTime = 0;
 let autoPlay = true;
 let autoTimer = 0;
+
+const sfx = createSfx();
+let soundOn = readSound();
+
+/** 設定の読み書き。プライベートモードでは localStorage が使えないことがある。 */
+function readSound(): boolean {
+  try {
+    return localStorage.getItem(SOUND_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+function writeSound(on: boolean): void {
+  try {
+    localStorage.setItem(SOUND_KEY, on ? '1' : '0');
+  } catch {
+    // 保存できなくても、このセッション中の ON/OFF には影響しない
+  }
+}
 
 // カメラ移動の補間用
 const camFrom = new THREE.Vector3();
@@ -42,13 +64,32 @@ const ui = createUi(SCENES, {
     autoTimer = 0;
     return autoPlay;
   },
+  toggleSound() {
+    soundOn = !soundOn;
+    sfx.setEnabled(soundOn);
+    writeSound(soundOn);
+    return soundOn;
+  },
 });
+
+ui.showSound(soundOn);
+
+// 前回 ON だった場合の復元。ブラウザは操作なしに音を出せないので、
+// AudioContext を作るのは最初のクリックかキー入力まで待つ。
+if (soundOn) {
+  const start = (): void => {
+    if (soundOn) sfx.setEnabled(true);
+  };
+  window.addEventListener('pointerdown', start, { once: true });
+  window.addEventListener('keydown', start, { once: true });
+}
 
 function select(index: number): void {
   const next = ((index % SCENES.length) + SCENES.length) % SCENES.length;
   if (next === current) return;
 
   ui.flash();
+  sfx.reset(); // 前のシーンの持続音を引きずらない
 
   if (root) {
     scene.remove(root);
@@ -127,7 +168,10 @@ function animate(): void {
     if (camT === 1) controls.autoRotate = true;
   }
 
-  SCENES[current]!.update(sceneTime, dt);
+  const mod = SCENES[current]!;
+  mod.update(sceneTime, dt);
+  // 音は鳴らせるときだけ。OFF の間は呼ばないので、映像側に影響しない
+  if (soundOn && sfx.active) mod.sound?.(sceneTime, dt, sfx);
 
   if (autoPlay) {
     autoTimer += dt;

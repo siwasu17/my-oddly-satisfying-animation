@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
+import { tone, tickers } from '../audio.ts';
 import { ember, drift } from '../palette.ts';
 
 const COUNT = 190;
@@ -15,6 +16,9 @@ let pivot: THREE.Group;
 /** 泡ごとの [x, z, 半径, 上る速さ, 位相] */
 const bubbles = new Float32Array(COUNT * 5);
 
+/** 泡ごとに、水面へ抜けた回数を数える */
+let ticks = tickers(COUNT);
+
 /** ぬるい水の中を、大小の泡がゆっくり昇っていく。 */
 export const driftingBubbles: SceneModule = {
   name: 'Drifting Bubbles',
@@ -22,6 +26,8 @@ export const driftingBubbles: SceneModule = {
   camera: { pos: [0, 3, 31], target: [0, 1.5, 0] },
 
   build(root) {
+    ticks = tickers(COUNT);
+
     let s = 0.731;
     const rnd = (): number => (s = (s * 9301 + 0.49297) % 1);
 
@@ -78,5 +84,23 @@ export const driftingBubbles: SceneModule = {
 
     mesh.instanceMatrix.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  },
+
+  sound(t, _dt, sfx) {
+    sfx.drone(tone(-5), 0.14); // 水の底に溜まった低い唸り
+
+    // 4 個に 1 つ、水面へ抜けた瞬間だけ鳴らす
+    for (let i = 0; i < COUNT; i += 4) {
+      const rad = bubbles[i * 5 + 2]!;
+      const phase = t * bubbles[i * 5 + 3]! + bubbles[i * 5 + 4]!;
+      for (let k = ticks[i]!(phase); k > 0; k--) {
+        sfx.drop(tone(13 - Math.round(rad * 12)), { // 大きい泡ほど低く鳴る
+          gain: 0.3,
+          decay: 0.7,
+          pan: bubbles[i * 5]! / SPREAD,
+          bend: 0.4,
+        });
+      }
+    }
   },
 };
