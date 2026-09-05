@@ -1,5 +1,7 @@
 # my-oddly-satisfying-animation
 
+公開 URL: <https://siwasu17.github.io/my-oddly-satisfying-animation/>（`main` への push で自動デプロイ）
+
 Three.js でつくった「見ていて気持ちのいい」ループアニメーション集。
 12 のシーンを自動／手動で切り替えながら眺められます。
 
