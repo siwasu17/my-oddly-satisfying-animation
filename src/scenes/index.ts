@@ -1,7 +1,7 @@
 import type { SceneModule } from '../types.ts';
 import { waveLattice } from './waveLattice.ts';
 import { flipGarden } from './flipGarden.ts';
-import { pendulumWave } from './pendulumWave.ts';
+import { twistColumn } from './twistColumn.ts';
 import { breathingRings } from './breathingRings.ts';
 import { rainRings } from './rainRings.ts';
 import { silkSheet } from './silkSheet.ts';
@@ -21,7 +21,7 @@ import { lightCorridor } from './lightCorridor.ts';
 export const SCENES: readonly SceneModule[] = [
   waveLattice,
   flipGarden,
-  pendulumWave,
+  twistColumn,
   breathingRings,
   rainRings,
   silkSheet,

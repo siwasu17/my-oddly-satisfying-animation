@@ -59,7 +59,7 @@ export function tone(n: number): number {
 /**
  * 位相が整数をまたいだ回数を返す関数を作る。
  *
- * 「波の山が通過した」「振り子が真下を通った」のような瞬間は、
+ * 「波の山が通過した」「牌が倒れ始めた」のような瞬間は、
  * どのシーンも t の関数として書けるので、その値が整数を越えたかで拾う。
  * 音を止めている間 sound() は呼ばれないため、間が空いても
  * 最大 2 回までしか返さない（再開時にまとめて鳴るのを防ぐ）。
@@ -77,7 +77,7 @@ export function ticker(): (phase: number) => number {
   };
 }
 
-/** ticker() を n 個まとめて作る。振り子やドミノのような列に使う。 */
+/** ticker() を n 個まとめて作る。ドミノや珠のれんのような列に使う。 */
 export function tickers(n: number): ((phase: number) => number)[] {
   return Array.from({ length: n }, () => ticker());
 }
