@@ -11,6 +11,8 @@ import { braidedHelix } from './braidedHelix.ts';
 import { gimbalRings } from './gimbalRings.ts';
 import { curtainWave } from './curtainWave.ts';
 import { lightCorridor } from './lightCorridor.ts';
+import { marbleMachine } from './marbleMachine.ts';
+import { cascadeTower } from './cascadeTower.ts';
 
 /**
  * タブと数字キーの並び順。
@@ -31,4 +33,6 @@ export const SCENES: readonly SceneModule[] = [
   gimbalRings,
   curtainWave,
   lightCorridor,
+  marbleMachine,
+  cascadeTower,
 ];
