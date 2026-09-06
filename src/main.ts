@@ -18,7 +18,7 @@ const { scene, camera, controls, composer } = stage;
 let current = -1;
 let root: THREE.Group | null = null;
 let sceneTime = 0;
-let autoPlay = true;
+let autoPlay = false;
 let autoTimer = 0;
 
 const sfx = createSfx();
