@@ -2,3 +2,7 @@ node_modules/
 dist/
 .DS_Store
 *.log
+
+# 並列作業用の worktree と、背面起動した dev サーバーの記録
+.claude/worktrees/
+.claude/.play/

@@ -8,7 +8,12 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "icons": "node scripts/make-icons.mjs"
+    "icons": "node scripts/make-icons.mjs",
+    "new-scene": "node scripts/new-scene.mjs",
+    "wt": "bash scripts/wt.sh",
+    "smoke": "bash scripts/dev-smoke.sh",
+    "play": "node scripts/play.mjs",
+    "merge-scene": "node scripts/merge-scene.mjs"
   },
   "dependencies": {
     "three": "^0.185.1"
