@@ -13,6 +13,7 @@ import { curtainWave } from './curtainWave.ts';
 import { lightCorridor } from './lightCorridor.ts';
 import { marbleMachine } from './marbleMachine.ts';
 import { cascadeTower } from './cascadeTower.ts';
+import { murmuration } from './murmuration.ts';
 
 /**
  * タブと数字キーの並び順。
@@ -35,4 +36,5 @@ export const SCENES: readonly SceneModule[] = [
   lightCorridor,
   marbleMachine,
   cascadeTower,
+  murmuration,
 ];
