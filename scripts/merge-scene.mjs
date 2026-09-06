@@ -73,16 +73,19 @@ function fail(message, ...details) {
 
 // --- リポジトリの場所 -----------------------------------------------------
 
-const commonDir = spawnSync(
+// ここだけは cwd（実行された場所）で見る。REPO_ROOT で見ると、worktree の中から
+// 呼ばれても親リポジトリの値が返ってしまい、Step 0 の判定がすり抜ける。
+const where = spawnSync(
   'git',
-  ['rev-parse', '--path-format=absolute', '--git-common-dir'],
+  ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'],
   { encoding: 'utf8' },
 );
-if (commonDir.status !== 0) {
+if (where.status !== 0) {
   console.error(color.red('✗ git リポジトリの中で実行してください。'));
   process.exit(1);
 }
-const REPO_ROOT = dirname(commonDir.stdout.trim());
+const [GIT_DIR, GIT_COMMON_DIR] = where.stdout.trim().split('\n');
+const REPO_ROOT = dirname(GIT_COMMON_DIR);
 
 // --- worktree の情報 ------------------------------------------------------
 
@@ -150,8 +153,8 @@ const branch = `scene/${name}`;
 
 // --- Step 0: 実行場所の確認 -----------------------------------------------
 
-// worktree の中では .git はファイルで、共通の .git とは別の場所を指す。
-if (gitOut(['rev-parse', '--git-dir']) !== gitOut(['rev-parse', '--git-common-dir'])) {
+// worktree では専用の .git ディレクトリを持つので、共通の .git とは別の場所を指す。
+if (GIT_DIR !== GIT_COMMON_DIR) {
   fail(
     'worktree の中では実行できません。',
     'main は親リポジトリでチェックアウトされているため、そちらで実行してください。',
