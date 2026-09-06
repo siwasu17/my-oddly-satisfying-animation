@@ -165,3 +165,23 @@ Core workflow:
 2. `agent-browser snapshot -i` - Get interactive elements with refs (@e1, @e2)
 3. `agent-browser click @e1` / `fill @e2 "text"` - Interact using refs
 4. Re-snapshot after page changes
+
+### サンドボックス環境での起動フラグ
+
+Claude Code をサンドボックス（cage など）付きで動かしていると、`agent-browser open` が
+`Auto-launch failed: CDP response channel closed` で失敗する。macOS の seatbelt サンドボックスは
+入れ子にできず、Chrome が自前のサンドボックスを初期化できないためで、ディレクトリの
+書き込み許可を足しても解消しない。
+
+その場合は起動フラグを渡す:
+
+```bash
+export AGENT_BROWSER_ARGS="--no-sandbox,--disable-gpu,--disable-crash-reporter,--disable-breakpad"
+```
+
+- `--no-sandbox` … 入れ子サンドボックスの失敗を回避する（これが本体）
+- `--disable-gpu` … GPU プロセス起動失敗による `GPU process isn't usable. Goodbye.` を避ける
+- `--disable-crash-reporter` `--disable-breakpad` … Crashpad が
+  `~/Library/Application Support/Google/Chrome for Testing/` に書けずに出すエラーを黙らせる
+
+`~/.agent-browser`（セッション状態・ソケット・Chrome バイナリ）への書き込みは必須。
