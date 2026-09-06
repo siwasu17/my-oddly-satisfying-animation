@@ -78,6 +78,7 @@ npm run dev                        # ポートは自動採番
 npm run typecheck
 npm run build                      # tsc --noEmit + vite build
 npm run smoke <camelCase>          # dev サーバーを立てて配信確認し、必ず落とす
+npm run shot -- <camelCase>        # #N へ直行して撮り、ページ内 JS エラーを判定する
 
 # 完成報告のときの引き渡し
 npm run play -- --bg <name>        # 背面で起動して URL を出す
@@ -92,6 +93,9 @@ npm run merge-scene -- --list           # マージできる scene/* ブラン�
 
 **完了報告の前に必ず** `npm run typecheck` → `npm run build` → `npm run smoke <camelCase>` を通すこと。
 build が通っても、`#app` が見つからない・モジュール解決に失敗するといった実行時の問題は build では拾えない。
+
+見た目の確認は `npm run shot -- <camelCase>` で行う。`agent-browser` を直接叩かない
+（詳しくは下の「Browser Automation」節）。
 
 ---
 
@@ -158,9 +162,26 @@ scripts/               new-scene.mjs / wt.sh / dev-smoke.sh / play.mjs / merge-s
 
 ## Browser Automation
 
-Use `agent-browser` for web automation. Run `agent-browser --help` for all commands.
+### シーンを見るときは `npm run shot`
 
-Core workflow:
+```bash
+npm run shot -- <camelCase>
+```
+
+**`agent-browser` を直接叩かない。** シーンの通し番号を `src/scenes/index.ts` と同じ規則で
+割り出して `<url>#N` へ直行し、960x600 で撮り、**ページ内の JS エラーがあれば非ゼロで終了する**。
+dev サーバーが立っていなければ背面で起動し、worktree ごとにポートもブラウザセッションも分ける。
+
+タブを `snapshot -i` して `click` で探しに行かないこと。ref は操作のたびに振り直されるので、
+`✗ Unknown ref` と再 snapshot の往復に落ちる。`#N` なら 1 回で決まる。
+
+`build()` の中で投げられた例外は `typecheck` も `build` も `smoke` も拾えない。
+`npm run shot` のエラー判定がその唯一の網になっている。
+
+### それ以外の用途で agent-browser を使うとき
+
+Run `agent-browser --help` for all commands.
+
 1. `agent-browser open <url>` - Navigate to page
 2. `agent-browser snapshot -i` - Get interactive elements with refs (@e1, @e2)
 3. `agent-browser click @e1` / `fill @e2 "text"` - Interact using refs
@@ -173,10 +194,11 @@ Claude Code をサンドボックス（cage など）付きで動かしている
 入れ子にできず、Chrome が自前のサンドボックスを初期化できないためで、ディレクトリの
 書き込み許可を足しても解消しない。
 
-その場合は起動フラグを渡す:
+**このフラグは `.claude/settings.json` の `env` に入れてあるので、通常は何もしなくてよい。**
+`export` を毎回前置きしないこと。
 
-```bash
-export AGENT_BROWSER_ARGS="--no-sandbox,--disable-gpu,--disable-crash-reporter,--disable-breakpad"
+```jsonc
+"env": { "AGENT_BROWSER_ARGS": "--no-sandbox,--disable-gpu,--disable-crash-reporter,--disable-breakpad" }
 ```
 
 - `--no-sandbox` … 入れ子サンドボックスの失敗を回避する（これが本体）
@@ -184,4 +206,9 @@ export AGENT_BROWSER_ARGS="--no-sandbox,--disable-gpu,--disable-crash-reporter,-
 - `--disable-crash-reporter` `--disable-breakpad` … Crashpad が
   `~/Library/Application Support/Google/Chrome for Testing/` に書けずに出すエラーを黙らせる
 
+設定は**セッション起動時に読まれる**ので、効いていないと感じたら
+`echo $AGENT_BROWSER_ARGS` で確認し、空ならその場だけ `export` する。
+
 `~/.agent-browser`（セッション状態・ソケット・Chrome バイナリ）への書き込みは必須。
+並列セッションでタブを取り合わないよう、`AGENT_BROWSER_SESSION` をセッションごとに分ける
+（`npm run shot` は worktree 名から `osa-<name>` を自動で設定する）。

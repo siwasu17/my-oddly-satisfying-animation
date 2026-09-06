@@ -15,6 +15,9 @@
       "Bash(npm run merge-scene:*)",
       "Bash(node scripts/new-scene.mjs:*)",
       "Bash(node scripts/play.mjs:*)",
+      "Bash(agent-browser:*)",
+      "Bash(node scripts/shot.mjs:*)",
+      "Bash(npm run shot:*)",
       "Bash(node scripts/merge-scene.mjs:*)",
       "Bash(bash scripts/dev-smoke.sh:*)",
       "Bash(bash scripts/wt.sh list)",
@@ -39,6 +42,9 @@
       "Bash(git push:*)",
       "Bash(rm -rf:*)"
     ]
+  },
+  "env": {
+    "AGENT_BROWSER_ARGS": "--no-sandbox,--disable-gpu,--disable-crash-reporter,--disable-breakpad"
   },
   "worktree": {
     "baseRef": "head"

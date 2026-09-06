@@ -32,6 +32,62 @@ export const sceneName: SceneModule = {
 `export` する `SceneModule` は **1 ファイルに 1 つだけ**。`src/scenes/index.ts` が
 ディレクトリを自動収集するので、登録作業は無い（`index.ts` は編集しない）。
 
+## 共有ファイルの API（これで足りる。`cat` で読み直さない）
+
+シーンから触れるのはこれだけ。`types.ts` / `palette.ts` / `audio.ts` / `stage.ts` を
+開いて確かめる必要は無い（読むだけで毎回 12KB 以上を消費する）。
+
+```ts
+// types.ts — export するのはこの形ちょうど 1 つ
+interface SceneModule {
+  name: string;                                        // タブに出る Title Case
+  desc: string;                                        // タイトル下の 1 行
+  camera: { pos: [number, number, number]; target: [number, number, number] };
+  build(root: THREE.Group): void;                      // 開くたびに呼ばれる
+  update(t: number, dt: number): void;                 // t = このシーンの経過秒（切替で 0 に戻る）
+  sound?(t: number, dt: number, sfx: Sfx): void;       // 音が ON のときだけ呼ばれる
+}
+
+// palette.ts
+const BG: number;                                      // 背景。シーン側で使うことはない
+const SURFACE: number;                                 // 床・支柱など光らないもの
+function ember(out: THREE.Color, n: number, shift?: number, glow?: number): THREE.Color;
+function emberColor(n: number, shift?: number, glow?: number): THREE.Color;
+function drift(t: number, speed?: number, amount?: number): number;   // 既定 0.05 / 0.03
+
+// audio.ts
+function tone(n: number): number;                      // 0 = A2。ペンタトニックなので濁らない
+function ticker(): (phase: number) => number;          // 位相が整数をまたいだ回数
+function tickers(n: number): ((phase: number) => number)[];
+
+interface VoiceOpt { gain?: number; decay?: number; pan?: number }   // pan は -1..1
+sfx.pluck(freq, opt?)                       // 既定 gain 0.5 / decay 1.6 / pan 0
+sfx.drop(freq, opt? & { bend?: number })    // 既定 gain 0.5 / decay 0.5 / bend 0.55
+sfx.air(opt? & { freq?; q?; sweep? })       // 既定 gain 0.4 / decay 1.2 / freq 700 / q 1.4
+sfx.drone(freq: number | null, gain?)       // null で止まる。毎フレーム呼んでよい
+```
+
+`ember()` の引数の効き方:
+
+- `n` … 0 = 暗い薔薇（HSL 0.925 / 0.55 / 0.11）〜 1 = 明るい琥珀（0.11 / 0.34 / 0.55）
+- `shift` … 色相のずらし幅。**±0.04 程度まで**。それ以上ずらすと帯からはみ出して青が混じる
+- `glow` … 明度への加算。強調したいところだけ少し持ち上げる
+
+### stage.ts が既に用意しているもの
+
+**シーン側でライトを足す前に、ここを読む。** たいていの場合は足す必要が無い。
+
+- `HemisphereLight(0xffd0a8, 0x140d0c, 0.9)` と `DirectionalLight(0xffd9b4, 1.25)`（右上手前から）
+- リムライトの `PointLight` が 2 つ（左奥に橙、右手前に薄紅）
+- `ACESFilmicToneMapping` / `toneMappingExposure = 0.92`（全体に暗め）
+- `UnrealBloomPass(strength 0.42, radius 0.85, threshold 0.28)` —
+  **明度 0.28 を超えたところが滲む。** 光らせたいものだけ `glow` を持ち上げれば、
+  自分で発光マテリアルを作らなくてよい
+- 縦長画面ではカメラが自動で後ろへ下がる（`fitScale()`）。画面比を気にしなくてよい
+- 放置すると `OrbitControls` がゆっくり自動回転する。真正面固定を前提にしない
+
+自分のシーンで光源を足すのは「ランプの中身のように、その物体自体が光っている」場合だけにする。
+
 ## InstancedMesh — 同じ形をたくさん出す
 
 ドローコール 1 回で数百個まで出せる。バーでも板でも珠でも、まずこれを検討する。
@@ -185,3 +241,48 @@ sound(t, _dt, sfx) {
 標準マテリアルの一部だけを書き換えたいときは `onBeforeCompile` を使う。
 `koiPond.ts` が水面・水底・浮き葉で 1 つの式を共有している例なので、必要になったらそれを読む。
 ただし **まずは CPU 側で形を作れないか考える**。ほとんどの動きはそれで足りている。
+
+## 見た目を確認する
+
+```bash
+npm run shot -- <camelCase>
+```
+
+これ 1 本で済む。**`agent-browser` を直接叩かない。**
+
+- シーンの通し番号を `src/scenes/index.ts` と同じ規則で割り出し、`<url>#N` へ直行する。
+  タブを `snapshot -i` して `click` で探す必要は無い（ref は毎回振り直されるので、
+  探しに行くと `✗ Unknown ref` で往復することになる）
+- dev サーバーが立っていなければ背面で起動する。worktree ごとにポートもブラウザセッションも
+  分かれるので、並列セッションと取り合わない
+- `AGENT_BROWSER_ARGS` の `export` は要らない（`.claude/settings.json` の `env` にある）
+- 960x600 で撮る。大きく撮ると読み込む画像もその分重くなる
+- **ページ内で JS エラーが出ていたら非ゼロで終了する。**
+  `build()` の中の例外は `typecheck` も `build` も `smoke` も拾えない。ここが唯一の網
+
+出力されたパスを `Read` して、自分の目で見る。
+
+```bash
+npm run shot -- <camelCase> --wait 4000        # 遅い周期のシーンで、動きが乗った瞬間を撮る
+npm run shot -- <camelCase> --out /path/a.png  # 変更前後を並べたいとき
+```
+
+### 見え方のセルフチェック
+
+撮った画像を見て、自分で答える。**ここで拾えなかったものは、必ずユーザーから指摘される。**
+過去に実際に指摘された内容がそのまま並んでいる。
+
+```
+□ 意図した被写体だと一目で分かるか（シルエットが別物に見えていないか）
+□ 騒がしくないか。同時に動くものを減らせないか
+□ 明るすぎないか。光っているのは主役だけか（就寝前に眺める前提）
+□ 手前の構造物が主役を隠していないか
+□ 画角は適切か。寄りすぎ・引きすぎになっていないか
+□ ページ内 JS エラーがゼロか（npm run shot が判定する）
+```
+
+**撮るのは 3 枚まで。** 1 枚が文脈におよそ 1,000 トークン積み上がる。
+3 枚で決まらないときは、細部を詰めずにユーザーへ渡して判断を仰ぐほうが早い。
+
+調整は**当てずっぽうで 1 つずつ撮り直さない**。チェックに引っかかった項目を全部拾って
+定数ブロックをまとめて書き換え、それから 1 枚撮る。

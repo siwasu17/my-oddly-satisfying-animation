@@ -41,7 +41,7 @@ Phase 0〜7 はそこに書かれたとおりに実行する。このファイ�
 | 3 | `AskUserQuestion` で仕様確認 | **聞かずに自分で決める** |
 | 4 | 足場を作る | 同じ |
 | 5 | 共有ファイルが要るならユーザーに相談 | **その案を捨てて自分のシーン内で完結させる** |
-| 6 | 検証 3 種 + スクリーンショット | 同じ（**省略しない**） |
+| 6 | 検証 3 種 + `npm run shot` | 同じ。ただし**省略できる条件が無い** |
 | 7 | コミット | 同じ |
 | 8 | 起動して引き渡し、目視確認を待つ | **スキップ** |
 | 8.5 | — | **新設: 自動マージのゲート** |
@@ -107,32 +107,28 @@ Phase 0〜7 はそこに書かれたとおりに実行する。このファイ�
 
 ---
 
-## Phase 6 の差分 — スクリーンショットを省略しない
+## Phase 6 の差分 — 見た目の確認を省略しない
 
-検証 3 種は通常どおり、全部通るまで進まない。
+手順は通常版と同じ。**省略できる条件だけが違う。**
+
+通常版には「ユーザーが実画面の確認は不要と言ったら飛ばしてよい」という逃げ道があるが、
+**自動モードにその逃げ道は無い。** 人間が最終確認をしないので、ここが唯一の
+「絵になっているか」のチェックであり、自動マージの前提条件になる。
 
 ```bash
 npm run typecheck
 npm run build
 npm run smoke <camelCase>
+npm run shot -- <camelCase>
 ```
 
-**見た目の確認も省略しない。** 通常版ではユーザーが最終確認するが、自動モードではここが唯一の
-「絵になっているか」のチェックになる。自動マージの前提条件なので、むしろここが要。
+`npm run shot` が `#N` へ直行して撮り、**ページ内 JS エラーがあれば非ゼロで終了する**。
+出力されたパスを `Read` して、`../new-scene/references/recipes.md` の
+「見え方のセルフチェック」6 項目に自分で答える。
+**真っ黒でないこと・意図した形が出ていること**を必ず自分の目で確かめる。
+おかしければ直して撮り直す（3 枚まで）。型エラーを `any` や `!` で黙らせない。
 
-```bash
-npm run play -- --bg <scene-name>
-```
-
-出力された URL を `agent-browser` で開き、タブの末尾にある自分のシーンでスクリーンショットを撮る。
-**真っ黒でないこと・意図した形が出ていること**を自分の目で確かめる。
-おかしければ直して撮り直す。型エラーを `any` や `!` で黙らせない。
-
-サンドボックス下では先にこれを export する（`CLAUDE.md` の「Browser Automation」節）:
-
-```bash
-export AGENT_BROWSER_ARGS="--no-sandbox,--disable-gpu,--disable-crash-reporter,--disable-breakpad"
-```
+`agent-browser` を直接叩く必要は無い。起動フラグもセッション名も `shot` 側で設定している。
 
 ここで起動した dev サーバーは Phase 9 の `merge-scene` が自動で停止する
 （内部で `play.mjs --stop <name>` を呼ぶ）ので、自分で落とさなくてよい。
@@ -153,11 +149,12 @@ export AGENT_BROWSER_ARGS="--no-sandbox,--disable-gpu,--disable-crash-reporter,-
 2. `npm run build` が通る
 3. `npm run smoke <camelCase>` が通る
 4. スクリーンショットで描画が確認できている（Phase 6）
-5. `git rev-parse --abbrev-ref HEAD` が `scene/<scene-name>`
-6. `git status --porcelain` が空（コミット済み）
-7. `git diff --name-only main...scene/<scene-name>` が **`src/scenes/<camelCase>.ts` の 1 行だけ**
+5. **`npm run shot` がページ内 JS エラーを報告していない**（終了コード 0）
+6. `git rev-parse --abbrev-ref HEAD` が `scene/<scene-name>`
+7. `git status --porcelain` が空（コミット済み）
+8. `git diff --name-only main...scene/<scene-name>` が **`src/scenes/<camelCase>.ts` の 1 行だけ**
 
-5〜7 はここで実行して確認する。
+6〜8 はここで実行して確認する。
 
 ```bash
 git rev-parse --abbrev-ref HEAD
@@ -165,7 +162,7 @@ git status --porcelain
 git diff --name-only main...scene/<scene-name>
 ```
 
-**7 が最重要。** `scripts/merge-scene.mjs` は共有ファイルの変更を黄色で警告するだけで**停止しない**。
+**8 が最重要。** `scripts/merge-scene.mjs` は共有ファイルの変更を黄色で警告するだけで**停止しない**。
 その手前でこのスキルが止める役をする。出力が 2 行以上、または `src/scenes/<camelCase>.ts` 以外を
 含んでいたら、**マージせずに中身をユーザーに見せて判断を仰ぐ。**
 
@@ -219,7 +216,7 @@ npm run play -- --bg
 2. **自分で決めた仕様** — 動きの主役 / ループ周期 / カメラ / 音。
    ユーザーは仕様を見ていないので、違和感を持てるように具体的に書く
 3. 出力された URL と、タブの何番目にあるか。止め方 `npm run play -- --stop`
-4. 検証結果 — typecheck / build / smoke / スクリーンショットと、ゲート 7 項目が全部通ったこと
+4. 検証結果 — typecheck / build / smoke / `shot`（ページ内 JS エラーなし）と、ゲート 8 項目が全部通ったこと
 5. `merge-scene` の出力 — マージコミットの短縮 SHA、`package-lock.json` 再生成の有無、
    削除した worktree とブランチ
 6. **まだ push していないこと**と、気に入らなければ

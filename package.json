@@ -13,6 +13,7 @@
     "wt": "bash scripts/wt.sh",
     "smoke": "bash scripts/dev-smoke.sh",
     "play": "node scripts/play.mjs",
+    "shot": "node scripts/shot.mjs",
     "merge-scene": "node scripts/merge-scene.mjs"
   },
   "dependencies": {
