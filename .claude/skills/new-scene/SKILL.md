@@ -163,7 +163,8 @@ node scripts/new-scene.mjs <scene-name>
 ```
 
 `src/scenes/<camelCase>.ts` に、動く最小のシーンができる。この時点で `npm run dev` を叩けば
-タブの末尾に出るはず（`src/scenes/index.ts` が自動収集するので登録作業は無い）。
+タブの先頭に出るはず（`src/scenes/index.ts` が自動収集し、新しいシーンほど先頭に並べるので
+登録作業は無い）。
 
 ---
 
@@ -291,7 +292,7 @@ npm run play -- --bg <scene-name>
 ```
 
 `http://localhost:<port>/` が出力されるので、それを報告に載せる。ポートは自動採番なので、
-出力された URL をそのまま使うこと（決め打ちしない）。自分のシーンはタブの末尾にある。
+出力された URL をそのまま使うこと（決め打ちしない）。自分のシーンはタブの先頭にある。
 
 Phase 6 の `npm run shot` が既に立てているはずなので、たいていは
 「すでに起動しています」と URL が出るだけになる。それで正しい。

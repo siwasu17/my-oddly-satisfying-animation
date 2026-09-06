@@ -55,7 +55,7 @@ URL の `#2` のようなハッシュで開始シーンを指定できます。�
 npm run wt new koi-pond          # .claude/worktrees/koi-pond に worktree と scene/koi-pond ブランチ
 cd .claude/worktrees/koi-pond
 npm run new-scene koi-pond       # src/scenes/koiPond.ts ができる
-npm run dev                      # ポートは自動採番。タブの末尾に出る
+npm run dev                      # ポートは自動採番。タブの先頭に出る
 ```
 
 検証と引き渡し:
@@ -202,7 +202,8 @@ scripts/               new-scene.mjs / wt.sh / dev-smoke.sh / play.mjs / merge-s
 
 シーンを足すときは `src/scenes/` に `SceneModule` を 1 つ export するファイルを置くだけです。
 `src/scenes/index.ts` が同じ階層の `.ts` を自動で読み込むので、登録作業はありません
-（並びは `index.ts` の `ORDER` 順で、そこに無いものはファイル名順で末尾に付きます）。
+（並びは新しいものが先頭で、`index.ts` の `ORDER`（追加された順）を逆に辿ります。
+`ORDER` に無いものは最新扱いで先頭に付きます）。
 `build(root)` で追加したものは切替時に `disposeGroup()` がまとめて破棄するので、後始末は不要です。
 
 効果音を付けるなら、任意の `sound(t, dt, sfx)` を足します。音が ON のときだけ
