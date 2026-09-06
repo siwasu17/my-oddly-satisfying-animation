@@ -14,6 +14,7 @@ import { lightCorridor } from './lightCorridor.ts';
 import { marbleMachine } from './marbleMachine.ts';
 import { cascadeTower } from './cascadeTower.ts';
 import { murmuration } from './murmuration.ts';
+import { koiPond } from './koiPond.ts';
 
 /**
  * タブと数字キーの並び順。
@@ -37,4 +38,5 @@ export const SCENES: readonly SceneModule[] = [
   marbleMachine,
   cascadeTower,
   murmuration,
+  koiPond,
 ];
