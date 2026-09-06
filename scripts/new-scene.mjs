@@ -51,7 +51,7 @@ console.log(`✓ src/scenes/${camel}.ts を作成しました。`);
 console.log('');
 console.log('次にやること:');
 console.log('');
-console.log('  npm run dev                          # 末尾のタブに追加されているのを確認する');
+console.log('  npm run dev                          # 先頭のタブに追加されているのを確認する');
 console.log(`  # src/scenes/${camel}.ts だけを編集する（他のファイルは共有物）`);
 console.log('');
 console.log('検証:');

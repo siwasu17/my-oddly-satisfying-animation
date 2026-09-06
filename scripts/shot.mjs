@@ -99,7 +99,8 @@ if (!existsSync(join(HERE, 'src', 'scenes', `${SCENE}.ts`))) {
 
 /**
  * src/scenes/index.ts の並び順を再現する。
- * ORDER にあるものはその順、無いものは名前順で末尾へ（index.ts の rank() と同じ）。
+ * ORDER（追加された順）を逆に辿り、ORDER に無いものは最新扱いで先頭へ
+ * （index.ts の rank() と同じ）。
  */
 function sceneOrder(dir) {
   const source = readFileSync(join(dir, 'src', 'scenes', 'index.ts'), 'utf8');
@@ -107,13 +108,13 @@ function sceneOrder(dir) {
   const order = block ? [...block[1].matchAll(/'([^']+)'/g)].map((m) => m[1]) : [];
   const rank = (name) => {
     const i = order.indexOf(name);
-    return i === -1 ? order.length : i;
+    return i === -1 ? -1 : order.length - 1 - i;
   };
   return readdirSync(join(dir, 'src', 'scenes'))
     .filter((f) => f.endsWith('.ts'))
     .map((f) => f.slice(0, -3))
     .filter((name) => name !== 'index')
-    .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+    .sort((a, b) => rank(a) - rank(b) || b.localeCompare(a));
 }
 
 // --- 2. dev サーバーを掴む -------------------------------------------------

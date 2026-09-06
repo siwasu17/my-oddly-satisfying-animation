@@ -1,20 +1,23 @@
 import type { SceneModule } from '../types.ts';
 
 /**
- * タブと数字キーの並び順。
+ * シーンが追加された順（古い → 新しい）。
  *
- * 動きの質が続けて似ないよう、面で見せるものと線で見せるものを交互にしている。
- * 先頭 4 つは URL の #1〜#4 が変わらないよう、初版の順のまま置いている。
+ * **タブと数字キーの並びはこれを逆にしたもの**で、新しいシーンほど先頭に出る。
+ * 追加日時は git 履歴から取っていて、同じコミットで入ったものは初版の並び
+ * （面で見せるものと線で見せるものが交互になる順）を残してある。
  *
- * ここに書かれていないシーンはファイル名順で末尾に付く。つまり
- * **シーンを 1 本足すときにこのファイルを編集する必要はない**（並列作業で
- * 衝突しないよう、追加のたびに触る共有ファイルを無くしてある）。
- * 並びを整えたくなったときだけ、ユーザーの判断でここへ足す。
+ * ここに書かれていないシーンは「いちばん新しいもの」として先頭に付く
+ * （複数あればファイル名の降順）。つまり **シーンを 1 本足すときにこのファイルを
+ * 編集する必要はない**（並列作業で衝突しないよう、追加のたびに触る共有ファイルを
+ * 無くしてある）。落ち着いたところでユーザーがここへ追記すると並びが固定される。
+ *
+ * 新しいものが先頭に来る以上、#N の番号はシーンを足すたびにずれる。
+ * URL の番号は固定されないものとして扱うこと。
  */
 const ORDER: readonly string[] = [
   'waveLattice',
   'flipGarden',
-  'twistColumn',
   'breathingRings',
   'rainRings',
   'silkSheet',
@@ -24,10 +27,16 @@ const ORDER: readonly string[] = [
   'gimbalRings',
   'curtainWave',
   'lightCorridor',
+  'twistColumn',
   'marbleMachine',
   'cascadeTower',
   'murmuration',
   'koiPond',
+  'loom',
+  'lavaLamp',
+  'nightParade',
+  'jellyGlobe',
+  'cloudRidge',
 ];
 
 /**
@@ -76,15 +85,15 @@ function pickScene(path: string, mod: Record<string, unknown>): SceneModule {
   return found[0]![1] as SceneModule;
 }
 
-/** ORDER にあるものはその順、無いものは名前順で末尾へ。 */
+/** ORDER を逆に辿る（新しいものほど前）。ORDER に無いものは最新扱いで先頭へ。 */
 function rank(name: string): number {
   const index = ORDER.indexOf(name);
-  return index === -1 ? ORDER.length : index;
+  return index === -1 ? -1 : ORDER.length - 1 - index;
 }
 
 const files = Object.entries(modules)
   .map(([path, mod]) => ({ name: baseName(path), path, mod }))
   .filter((file) => file.name !== 'index')
-  .sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name));
+  .sort((a, b) => rank(a.name) - rank(b.name) || b.name.localeCompare(a.name));
 
 export const SCENES: readonly SceneModule[] = files.map((file) => pickScene(file.path, file.mod));
