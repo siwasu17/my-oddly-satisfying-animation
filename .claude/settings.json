@@ -1,0 +1,46 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install)",
+      "Bash(npm install --no-audit --no-fund)",
+      "Bash(npm ci:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash(npm run preview:*)",
+      "Bash(npm run smoke:*)",
+      "Bash(npm run play:*)",
+      "Bash(npm run new-scene:*)",
+      "Bash(npm run wt:*)",
+      "Bash(npm run merge-scene:*)",
+      "Bash(node scripts/new-scene.mjs:*)",
+      "Bash(node scripts/play.mjs:*)",
+      "Bash(node scripts/merge-scene.mjs:*)",
+      "Bash(bash scripts/dev-smoke.sh:*)",
+      "Bash(bash scripts/wt.sh list)",
+      "Bash(bash scripts/wt.sh new:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git add:*)",
+      "Bash(git worktree list)",
+      "Bash(git rev-parse:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(rg:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)"
+    ],
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(rm -rf:*)"
+    ]
+  },
+  "worktree": {
+    "baseRef": "head"
+  }
+}
