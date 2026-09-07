@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { SceneModule } from '../types.ts';
-import { tone, ticker } from '../audio.ts';
-import { ember, drift } from '../palette.ts';
+import type { SceneModule } from '../../types.ts';
+import { tone, ticker } from '../../audio.ts';
+import { ember, drift } from '../../palette.ts';
 
 /**
  * イルカの群れ（ポッド）。

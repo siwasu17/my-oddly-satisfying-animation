@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { SceneModule } from '../types.ts';
-import { tone, tickers } from '../audio.ts';
-import { SURFACE, ember, emberColor, drift } from '../palette.ts';
+import type { SceneModule } from '../../types.ts';
+import { tone, tickers } from '../../audio.ts';
+import { SURFACE, ember, emberColor, drift } from '../../palette.ts';
 
 /**
  * Lazy River。流れるプール。

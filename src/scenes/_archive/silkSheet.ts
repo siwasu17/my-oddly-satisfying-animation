@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { SceneModule } from '../types.ts';
-import { tone, ticker } from '../audio.ts';
-import { ember, drift } from '../palette.ts';
+import type { SceneModule } from '../../types.ts';
+import { tone, ticker } from '../../audio.ts';
+import { ember, drift } from '../../palette.ts';
 
 const W = 26; // 布の横幅
 const H = 18; // 布の奥行き

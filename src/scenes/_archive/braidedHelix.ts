@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { SceneModule } from '../types.ts';
-import { tone, tickers } from '../audio.ts';
-import { ember, drift } from '../palette.ts';
+import type { SceneModule } from '../../types.ts';
+import { tone, tickers } from '../../audio.ts';
+import { ember, drift } from '../../palette.ts';
 
 const STRANDS = 3;
 const BEADS = 150; // 1 本あたりの粒の数
