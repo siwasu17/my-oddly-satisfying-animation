@@ -30,7 +30,6 @@ const ORDER: readonly string[] = [
   'twistColumn',
   'marbleMachine',
   'cascadeTower',
-  'murmuration',
   'koiPond',
   'loom',
   'lavaLamp',
