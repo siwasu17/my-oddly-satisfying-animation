@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { SceneModule } from '../types.ts';
-import { tone, ticker } from '../audio.ts';
-import { ember, drift } from '../palette.ts';
+import type { SceneModule } from '../../types.ts';
+import { tone, ticker } from '../../audio.ts';
+import { ember, drift } from '../../palette.ts';
 
 const COUNT = 70; // 輪の枚数
 const GAP = 1.5; // 輪の間隔

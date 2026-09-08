@@ -24,7 +24,6 @@ const ORDER: readonly string[] = [
   'driftingBubbles',
   'gimbalRings',
   'curtainWave',
-  'lightCorridor',
   'twistColumn',
   'marbleMachine',
   'cascadeTower',

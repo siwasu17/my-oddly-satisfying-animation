@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { SceneModule } from '../types.ts';
-import { tickers } from '../audio.ts';
-import { SURFACE, ember, drift } from '../palette.ts';
+import type { SceneModule } from '../../types.ts';
+import { tickers } from '../../audio.ts';
+import { SURFACE, ember, drift } from '../../palette.ts';
 
 /**
  * Spiral Fall。

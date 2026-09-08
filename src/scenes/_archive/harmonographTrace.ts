@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { SceneModule } from '../types.ts';
-import { tone, tickers } from '../audio.ts';
-import { ember, drift, SURFACE } from '../palette.ts';
+import type { SceneModule } from '../../types.ts';
+import { tone, tickers } from '../../audio.ts';
+import { ember, drift, SURFACE } from '../../palette.ts';
 
 /**
  * Harmonograph Trace。
