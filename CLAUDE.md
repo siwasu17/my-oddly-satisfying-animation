@@ -2,8 +2,7 @@
 
 Three.js のループアニメーションを、複数の Claude Code セッションで **並列に** 増やすためのリポジトリ。
 
-- ビルド: Vite / 言語: TypeScript / 3D: Three.js
-- パッケージマネージャ: npm
+- ビルド: Vite / 言語: TypeScript / 3D: Three.js / パッケージマネージャ: npm
 - アプリは 1 本。`src/scenes/` の各ファイルが 1 シーンで、タブと自動切替で切り替わる。
 
 ---
@@ -23,25 +22,21 @@ Three.js のループアニメーションを、複数の Claude Code セッシ�
 - `src/palette.ts`（暖色パレット）、`src/audio.ts`（効果音）、`src/ui.ts`（タブ・キー操作）
 - `src/main.ts`、`src/types.ts`、`src/scenes/index.ts`
 - `index.html`、`package.json`、`vite.config.ts`、`tsconfig.json`
-- `README.md`、この `CLAUDE.md`、`templates/`、`scripts/`、`.github/`
+- `README.md`、この `CLAUDE.md`、`docs/`、`templates/`、`scripts/`、`.github/`
 
-「palette にこの色があると便利だ」と思ったら、まずは自分のシーン内に書く。
-3〜4 本のシーンで同じものが必要になって初めて共通化する（判断はユーザーが行う）。
-共有コードが厚いほど並列作業の衝突面が増える。
+共通化したくなっても、まずは自分のシーン内に書く。3〜4 本のシーンで同じものが必要に
+なって初めて共通化する（判断はユーザーが行う）。共有コードが厚いほど衝突面が増える。
 
 ### 2. シーンの登録作業は無い
 
 `src/scenes/index.ts` が同じ階層の `.ts` を `import.meta.glob` で自動収集する。
 **新しいシーンを足すときにこのファイルを編集しないこと。** 編集すると並列セッションと衝突する。
 
-タブは**新しいシーンほど先頭**に並ぶ。`index.ts` の `ORDER` はシーンが追加された順
-（古い → 新しい）で、表示はそれを逆に辿る。`ORDER` に無いシーンは最新扱いで先頭に付く。
-新しいシーンは先頭に出るのが正しい状態。`ORDER` への追記と並びの調整はユーザーの仕事。
+タブは**新しいシーンほど先頭**に並ぶ（`ORDER` は追加順で、表示はそれを逆に辿る。`ORDER` に
+無いシーンは最新扱いで先頭に付く）。`ORDER` への追記と並びの調整はユーザーの仕事。
+シーンを足すたび既存の `#N` はずれる。URL の番号は固定されない。
 
-新しいシーンを足すたびに既存シーンの `#N` はずれる。URL の番号は固定されない。
-
-README にもシーン表は置いていない。シーンの説明は
-**そのファイルの冒頭コメントと `SceneModule.desc`** に書くこと。
+シーンの説明は README に書かない。**そのファイルの冒頭コメントと `SceneModule.desc`** に書く。
 
 ### 3. 依存追加は勝手にしない
 
@@ -51,45 +46,36 @@ README にもシーン表は置いていない。シーンの説明は
 
 ### 4. コミットは自分のブランチにだけ
 
-worktree 運用をしている場合、自分のブランチは `scene/<name>`。
-`main` に直接コミットしない。push はユーザーが行う。
+自分のブランチは `scene/<name>`。`main` に直接コミットしない。push はユーザーが行う。
 
 `main` への取り込みは `npm run merge-scene <name>` で行う。**手で `git merge` しない。**
 未コミットの変更や lockfile の衝突、他セッションが使用中の worktree を、このスクリプトが見てくれる。
 
 ### 5. dev サーバー
 
-- ポートは **指定しない**。Vite が空いているポートへ自動で繰り上げる（5173 → 5174 → …）。
+- ポートは **指定しない**。Vite が空いているポートへ自動で繰り上げる。
   ポートを固定すると他セッションの dev サーバーと必ず衝突する。
 - 確認が終わったら落とす。起動しっぱなしにしない。
-- **例外**: 完成報告のとき、ユーザーがすぐ見られるように `npm run play -- --bg <name>` で 1 本だけ
-  起動したまま渡す。止め方（`npm run play -- --stop <name>`）も一緒に伝えること。
+- **例外**: 完成報告のとき、`npm run play -- --bg <name>` で 1 本だけ起動したまま渡す。
+  止め方（`npm run play -- --stop <name>`）も一緒に伝えること。
 
 ---
 
 ## よく使うコマンド
 
 ```bash
-# 新しいシーンを作る（推奨: 仕様決め〜実装〜検証〜コミットまで通しで行う）
-/new-scene <scene-name> <コンセプト>
+/new-scene <scene-name> <コンセプト>    # 仕様決め〜実装〜検証〜コミットまで通しで行う（推奨）
+npm run new-scene <scene-name>          # 足場だけ手で作る。src/scenes/<camelCase>.ts ができる
 
-# 足場だけ手で作る場合
-npm run new-scene <scene-name>     # kebab-case。src/scenes/<camelCase>.ts ができる
-
-# 動かす・検証する
-npm run dev                        # ポートは自動採番
+npm run dev                             # ポートは自動採番
 npm run typecheck
-npm run build                      # tsc --noEmit + vite build
-npm run smoke <camelCase>          # dev サーバーを立てて配信確認し、必ず落とす
-npm run shot -- <camelCase>        # #N へ直行して撮り、ページ内 JS エラーを判定する
+npm run build                           # tsc --noEmit + vite build
+npm run smoke <camelCase>               # dev サーバーを立てて配信確認し、必ず落とす
+npm run shot -- <camelCase>             # #N へ直行して撮り、ページ内 JS エラーを判定する
 
-# 完成報告のときの引き渡し
-npm run play -- --bg <name>        # 背面で起動して URL を出す
-npm run play -- --list
-npm run play -- --stop <name>
+npm run play -- --bg <name>             # 完成報告用に背面で起動して URL を出す（--list / --stop）
 
-# main に取り込む（親リポジトリで実行する）
-npm run merge-scene <name>              # 停止 → マージ → 衝突解決 → 検証 → 後始末
+npm run merge-scene <name>              # main へ取り込む（親リポジトリで実行）
 npm run merge-scene <name> -- --dry-run # 何をするか見るだけ
 npm run merge-scene -- --list           # マージできる scene/* ブランチの一覧
 ```
@@ -97,53 +83,14 @@ npm run merge-scene -- --list           # マージできる scene/* ブラン�
 **完了報告の前に必ず** `npm run typecheck` → `npm run build` → `npm run smoke <camelCase>` を通すこと。
 build が通っても、`#app` が見つからない・モジュール解決に失敗するといった実行時の問題は build では拾えない。
 
-見た目の確認は `npm run shot -- <camelCase>` で行う。`agent-browser` を直接叩かない
-（詳しくは下の「Browser Automation」節）。
+## worktree
 
----
-
-## 並列作業のセットアップ（worktree）
-
-**セッション内で worktree に入るのが基本。** `EnterWorktree` ツールを使うと、いま動いている
-セッションの作業ディレクトリがそのまま `.claude/worktrees/<name>` に切り替わる。
-別ターミナルで `claude` を起動し直す必要はない。`/new-scene` はこれを自動で行う。
-
-```
-EnterWorktree({ name: "<scene-name>" })   # .claude/worktrees/<name> を作ってそこへ移動
-git branch -m scene/<scene-name>          # 作られるブランチ名は worktree-<name> なので改名する
-ExitWorktree({ action: "keep" })          # 抜ける（"remove" で worktree ごと削除）
-```
-
-分岐元はローカルの現在の `main`（`.claude/settings.json` の `worktree.baseRef: "head"`）。
+**セッション内で worktree に入るのが基本。** `EnterWorktree({ name: "<scene-name>" })` で
+作業ディレクトリが `.claude/worktrees/<name>` に切り替わる（`/new-scene` が自動で行う）。
+作られるブランチ名は `worktree-<name>` なので `git branch -m scene/<name>` で改名する。
+抜けるのは `ExitWorktree({ action: "keep" })`。分岐元はローカルの現在の `main`。
 worktree には `node_modules` が無いので、入ったら `npm install` する。
-
-複数ターミナルで本当に同時並行させたいときだけ、手動用のスクリプトを使う:
-
-```bash
-bash scripts/wt.sh new <scene-name>   # worktree を作り install まで行う
-bash scripts/wt.sh list
-bash scripts/wt.sh rm <scene-name>
-```
-
-この場合、各セッションは自分の worktree ディレクトリ（`.claude/worktrees/<name>`）で `claude` を起動する。
-`.claude/worktrees/` は `.gitignore` に入れてあるため、親リポジトリ側の `git status` や
-検索が他セッションの作業を拾うことはない。
-
----
-
-## ディレクトリ構成
-
-```
-src/scenes/<name>.ts   各シーン（1 ファイル = 1 シーン = 1 セッションの担当範囲）
-src/scenes/index.ts    シーンの自動収集と並び順（追加時に編集しない）
-src/stage.ts           レンダラ / カメラ / ライト / ブルームの共通設定
-src/palette.ts         全シーン共通の暖色パレット
-src/audio.ts           Web Audio API による効果音（音声ファイルは持たない）
-src/ui.ts              タブ・タイトル・キーボード操作
-src/main.ts            シーン切替・カメラ補間・メインループ
-templates/scene.ts     新規シーンの雛形
-scripts/               new-scene.mjs / wt.sh / dev-smoke.sh / play.mjs / merge-scene.mjs
-```
+複数ターミナルで本当に同時並行させたいときだけ `npm run wt new|list|rm <scene-name>` を使う。
 
 ## シーンを書くときの約束
 
@@ -163,55 +110,12 @@ scripts/               new-scene.mjs / wt.sh / dev-smoke.sh / play.mjs / merge-s
 - `import type` を使う（型のみの import は `import type` で書く）。
 - 300 行を大きく超えそうなら、動きを減らすほうを先に考える。
 
-## Browser Automation
+## ブラウザで見るとき
 
-### シーンを見るときは `npm run shot`
+見た目の確認は `npm run shot -- <camelCase>` で行う。**`agent-browser` を直接叩かない。**
+タブを `snapshot -i` して `click` で探しに行かないこと（ref が振り直されて往復に落ちる）。
+`build()` の中で投げられた例外は `typecheck` も `build` も `smoke` も拾えず、
+`npm run shot` のエラー判定が唯一の網になっている。
 
-```bash
-npm run shot -- <camelCase>
-```
-
-**`agent-browser` を直接叩かない。** シーンの通し番号を `src/scenes/index.ts` と同じ規則で
-割り出して `<url>#N` へ直行し、960x600 で撮り、**ページ内の JS エラーがあれば非ゼロで終了する**。
-dev サーバーが立っていなければ背面で起動し、worktree ごとにポートもブラウザセッションも分ける。
-
-タブを `snapshot -i` して `click` で探しに行かないこと。ref は操作のたびに振り直されるので、
-`✗ Unknown ref` と再 snapshot の往復に落ちる。`#N` なら 1 回で決まる。
-
-`build()` の中で投げられた例外は `typecheck` も `build` も `smoke` も拾えない。
-`npm run shot` のエラー判定がその唯一の網になっている。
-
-### それ以外の用途で agent-browser を使うとき
-
-Run `agent-browser --help` for all commands.
-
-1. `agent-browser open <url>` - Navigate to page
-2. `agent-browser snapshot -i` - Get interactive elements with refs (@e1, @e2)
-3. `agent-browser click @e1` / `fill @e2 "text"` - Interact using refs
-4. Re-snapshot after page changes
-
-### サンドボックス環境での起動フラグ
-
-Claude Code をサンドボックス（cage など）付きで動かしていると、`agent-browser open` が
-`Auto-launch failed: CDP response channel closed` で失敗する。macOS の seatbelt サンドボックスは
-入れ子にできず、Chrome が自前のサンドボックスを初期化できないためで、ディレクトリの
-書き込み許可を足しても解消しない。
-
-**このフラグは `.claude/settings.json` の `env` に入れてあるので、通常は何もしなくてよい。**
-`export` を毎回前置きしないこと。
-
-```jsonc
-"env": { "AGENT_BROWSER_ARGS": "--no-sandbox,--disable-gpu,--disable-crash-reporter,--disable-breakpad" }
-```
-
-- `--no-sandbox` … 入れ子サンドボックスの失敗を回避する（これが本体）
-- `--disable-gpu` … GPU プロセス起動失敗による `GPU process isn't usable. Goodbye.` を避ける
-- `--disable-crash-reporter` `--disable-breakpad` … Crashpad が
-  `~/Library/Application Support/Google/Chrome for Testing/` に書けずに出すエラーを黙らせる
-
-設定は**セッション起動時に読まれる**ので、効いていないと感じたら
-`echo $AGENT_BROWSER_ARGS` で確認し、空ならその場だけ `export` する。
-
-`~/.agent-browser`（セッション状態・ソケット・Chrome バイナリ）への書き込みは必須。
-並列セッションでタブを取り合わないよう、`AGENT_BROWSER_SESSION` をセッションごとに分ける
-（`npm run shot` は worktree 名から `osa-<name>` を自動で設定する）。
+起動フラグやサンドボックスまわりの詳細は [`docs/browser-automation.md`](./docs/browser-automation.md)。
+実装の解説（水面・効果音・色・PWA）は [`docs/design-notes.md`](./docs/design-notes.md)。

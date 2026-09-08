@@ -105,7 +105,7 @@ Phase 0〜7 はそこに書かれたとおりに実行する。このファイ�
 
 `src/stage.ts` / `src/palette.ts` / `src/audio.ts` / `src/ui.ts` / `src/main.ts` / `src/types.ts` /
 `src/scenes/index.ts` / `index.html` / `package.json` / `vite.config.ts` / `tsconfig.json` /
-`README.md` / `CLAUDE.md` / `templates/` / `scripts/` / `.github/` は**編集しない**。
+`README.md` / `CLAUDE.md` / `docs/` / `templates/` / `scripts/` / `.github/` は**編集しない**。
 
 `npm install <package>` も**しない**。依存が要る案なら、その案自体を捨てる。
 

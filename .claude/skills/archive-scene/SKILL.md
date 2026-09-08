@@ -243,7 +243,7 @@ npm run shot -- <camelCase>
 
 `src/stage.ts` / `src/palette.ts` / `src/audio.ts` / `src/ui.ts` / `src/main.ts` / `src/types.ts` /
 `scripts/` / `package.json` / `tsconfig.json` / `vite.config.ts` / `index.html` / `README.md` /
-`CLAUDE.md` は**一切変更しない**。`src/scenes/index.ts` も Phase 3 の 1 行削除だけ。
+`CLAUDE.md` / `docs/` は**一切変更しない**。`src/scenes/index.ts` も Phase 3 の 1 行削除だけ。
 
 新しい npm スクリプトも足さない。このスキルは既存の `typecheck` / `build` / `shot` だけで完結する。
 

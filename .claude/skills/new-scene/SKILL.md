@@ -209,7 +209,7 @@ node scripts/new-scene.mjs <scene-name>
 - `src/stage.ts` / `src/palette.ts` / `src/audio.ts` / `src/ui.ts` / `src/main.ts` / `src/types.ts`
 - `src/scenes/index.ts`（**シーン追加では絶対に編集しない**。自動収集される）
 - `index.html` / `package.json` / `vite.config.ts` / `tsconfig.json`
-- `README.md` / `CLAUDE.md` / `templates/` / `scripts/` / `.github/`
+- `README.md` / `CLAUDE.md` / `docs/` / `templates/` / `scripts/` / `.github/`
 
 「palette にこの色があると便利だ」と思っても、まずは自分のシーン内に書く。共通化の判断はユーザーが行う。
 
