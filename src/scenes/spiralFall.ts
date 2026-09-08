@@ -6,7 +6,7 @@ import { SURFACE, ember, drift } from '../palette.ts';
 /**
  * Spiral Fall。
  *
- * 何が動くか: 葉のような薄い板が中心の高い位置から放たれ、螺旋を描きながら
+ * 何が動くか: 先端が尖った葉の形をした板が中心の高い位置から放たれ、螺旋を描きながら
  *   ゆっくり降下する。降下の途中で不規則に上昇気流に乗り、ふわっと持ち上がって
  *   巻き返す瞬間を挟みながら地面へ近づいていく。
  * 気持ちよさの芯: 一定速度で落ちるのではなく、落下と巻き返しが不規則に
@@ -54,6 +54,22 @@ let ticks: ((phase: number) => number)[] = [];
 let s = 0.731;
 const rnd = (): number => (s = (s * 9301 + 0.49297) % 1);
 
+/** 先端が尖った葉のシルエット。原点は葉の中心、長さ方向は Z 軸に合わせてある */
+function leafGeometry(): THREE.BufferGeometry {
+  const shape = new THREE.Shape();
+  shape.moveTo(0, -0.5);
+  shape.quadraticCurveTo(0.2, -0.3, 0.15, 0.08);
+  shape.lineTo(0.045, 0.4);
+  shape.lineTo(0, 0.52);
+  shape.lineTo(-0.045, 0.4);
+  shape.lineTo(-0.15, 0.08);
+  shape.quadraticCurveTo(-0.2, -0.3, 0, -0.5);
+
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.015, bevelEnabled: false });
+  geo.rotateX(-Math.PI / 2);
+  return geo;
+}
+
 export const spiralFall: SceneModule = {
   name: 'Spiral Fall',
   desc: '葉が螺旋を描きながら落ち、時おり上昇気流にふわりと巻き返される。',
@@ -76,8 +92,8 @@ export const spiralFall: SceneModule = {
       params[b + 8] = 1.3 + rnd() * 1.7; // flutterSpeed
     }
 
-    const geo = new THREE.BoxGeometry(0.5, 0.02, 0.82);
-    const mat = new THREE.MeshStandardMaterial({ roughness: 0.42, metalness: 0.2 });
+    const geo = leafGeometry();
+    const mat = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0.08 });
 
     mesh = new THREE.InstancedMesh(geo, mat, COUNT);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -85,7 +101,7 @@ export const spiralFall: SceneModule = {
 
     const floor = new THREE.Mesh(
       new THREE.CircleGeometry(R_MAX * 1.4, 96),
-      new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.6, metalness: 0.12 }),
+      new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.72, metalness: 0.06 }),
     );
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = BOTTOM_Y - 0.4;
@@ -125,7 +141,7 @@ export const spiralFall: SceneModule = {
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
 
-      ember(color, 0.18 + bump * 0.28, hue);
+      ember(color, 0.16 + bump * 0.12, hue);
       mesh.setColorAt(i, color);
     }
     mesh.instanceMatrix.needsUpdate = true;
