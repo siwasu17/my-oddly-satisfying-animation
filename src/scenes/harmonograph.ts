@@ -1,34 +1,33 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
 import { tone, ticker } from '../audio.ts';
-import { SURFACE, ember, drift } from '../palette.ts';
+import { ember, drift } from '../palette.ts';
 
 /**
  * Harmonograph。
  *
- * 何が動くか: 整数比の2軸振動が描くリサジュー曲線を、太い先頭がなぞって
- * いく。軌跡は帯として常に一周ぶん残り続け、頭から離れるほど細く暗く
- * 沈んでいく。
+ * 何が動くか: 2軸の振動が花びら状に重なって描くバラ曲線を、太い先頭が
+ * なぞっていく。軌跡は帯として常に一周ぶん残り続け、頭から離れるほど
+ * 細く暗く沈んでいく。
  * 気持ちよさの芯: 軌跡の長さをちょうど周期と揃えてあるので、帯の末端は
- * 数学的に必ず先頭の現在位置と重なる。曲線は常に閉じたまま、明るい頭だけが
- * その上を巡り続ける。
- * ループの周期: PERIOD 秒（4:3 という単純な整数比の振動なので、何周しても
- * 寸分違わず同じ形へ戻る）。
+ * 数学的に必ず先頭の現在位置と重なる。花びらの形は常に閉じたまま、
+ * 明るい頭だけがその輪郭を巡り続ける。
+ * ループの周期: PERIOD 秒（花びらの数 PETALS*2 が決める形は、角度が
+ * ちょうど1周する PERIOD 秒ごとに寸分違わず同じ形へ戻る）。
  * カメラ: ほぼ真上からの俯瞰。
  * 音: 先頭点が中心から離れるほど低い持続音がわずかに膨らみ、頭が一周して
  * 元の位相へ戻るたびに澄んだ一音を鳴らす。
  * スコープ外: 複数の振り子や手を加えた操作、曲線の色分けによる速度表示。
  */
 
-/** 1 周にかかる秒数。曲線の速さはここで決まる（下の整数比は崩さないこと） */
+/** 1 周にかかる秒数。曲線の速さはここで決まる */
 const PERIOD = 24;
 /** 軌跡を何本の線分でつなぐか。ちょうど 1 周ぶんを描くように間隔が決まる */
 const SEGMENTS = 220;
-/** 曲線の広がり */
-const RADIUS = 8.4;
-/** x 側 / z 側の振動数（単純な整数比だけを使い、絡まりすぎないようにする） */
-const NX = 4;
-const NZ = 3;
+/** 曲線の広がり（花びらの先端までの距離） */
+const RADIUS = 6;
+/** 花びらの対の数（2 なら花びら4枚、3 なら6枚） */
+const PETALS = 2;
 /** 高さの上下（整数倍でないと閉じない） */
 const NY = 1;
 /** 帯の基本の太さ */
@@ -51,10 +50,12 @@ let mesh: THREE.InstancedMesh;
 let tick = ticker();
 
 function curveX(u: number): number {
-  return RADIUS * Math.cos(NX * ANGULAR * u);
+  const a = ANGULAR * u;
+  return RADIUS * Math.cos(PETALS * a) * Math.cos(a);
 }
 function curveZ(u: number): number {
-  return RADIUS * Math.sin(NZ * ANGULAR * u);
+  const a = ANGULAR * u;
+  return RADIUS * Math.cos(PETALS * a) * Math.sin(a);
 }
 function curveY(u: number): number {
   return 0.55 + 0.25 * Math.sin(NY * ANGULAR * u);
@@ -69,8 +70,8 @@ function wrapPulse(t: number): number {
 
 export const harmonograph: SceneModule = {
   name: 'Harmonograph',
-  desc: '振り子が描くリサジュー曲線を、明るい先頭が常に閉じたまま巡り続ける。',
-  camera: { pos: [0, 22, 6.5], target: [0, 0.4, 0] },
+  desc: '振り子が描く花びら状の曲線を、明るい先頭が常に閉じたまま巡り続ける。',
+  camera: { pos: [0, 18, 7], target: [0, 0.4, 0] },
 
   build(root) {
     tick = ticker();
@@ -80,15 +81,6 @@ export const harmonograph: SceneModule = {
     mesh = new THREE.InstancedMesh(geo, mat, SEGMENTS);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     root.add(mesh);
-
-    // 金属質の床。軌跡が薄く映り込んで奥行きが出る
-    const floor = new THREE.Mesh(
-      new THREE.CircleGeometry(RADIUS * 1.7, 96),
-      new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.55, metalness: 0.35 }),
-    );
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.y = -0.02;
-    root.add(floor);
   },
 
   // 形は毎フレーム t から作り直す。各線分の両端は「t からどれだけ過去か」を
