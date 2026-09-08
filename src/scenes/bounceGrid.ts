@@ -6,14 +6,15 @@ import { SURFACE, ember, drift } from '../palette.ts';
 /**
  * Bounce Grid。
  *
- * 何が動くか: 9x9 に並んだ球が、着地の瞬間だけ潰れ、跳ね上がる瞬間だけ縦に伸びて
- * また落ちていく。位相は格子の対角線（i + j）に沿ってわずかにずらしてあるので、
- * 全体としては波が斜めに何度も横切っていくように見える。
+ * 何が動くか: 7x7 に並んだ球が、着地の瞬間だけ潰れ、跳ね上がる瞬間だけ縦に伸びて
+ * また落ちていく。位相は格子の対角線（i + j）に沿ってずらしてあるので、
+ * 全体としては波が斜めに何度も横切っていくように見える。床の薄いグリッド線が
+ * 行・列の目印になる。
  * 気持ちよさの芯: 「潰れる → 伸びる → 浮く → また潰れる」という弾性の間（ま）が、
  * 斜めの波に乗って次々と伝わっていくところ。
  * ループの周期: 1 個あたりの跳躍は約 2.4 秒。波が格子を何周分ずらすかは固定なので、
  * 開き直しても同じ波が同じ位置から始まる。
- * カメラ: 斜め上から見下ろす俯瞰。
+ * カメラ: 斜め45度・急な俯角から見下ろし、格子の行と列の隙間が読めるようにする。
  * 音: 対角線の帯ごとに、着地の瞬間だけ短い撥音を鳴らす。波の進む向きに合わせて
  * 音像も左右に流れる。
  * スコープ外: 球同士の衝突や、床のたわみは扱わない。
@@ -23,27 +24,27 @@ import { SURFACE, ember, drift } from '../palette.ts';
 const GRID = 7;
 const COUNT = GRID * GRID;
 /** 格子の間隔 */
-const SPACING = 1.9;
+const SPACING = 2.2;
 /** 球の半径（潰れていない状態） */
 const BALL_RADIUS = 0.4;
 /** 跳躍の高さ（球の底が浮く最大量） */
-const AMPLITUDE = 2.4;
+const AMPLITUDE = 1.4;
 /** 1 秒あたりの跳躍回数 */
 const BOUNCE_FREQ = 0.42;
 /** 対角線の端から端まで、位相をどれだけずらすか（周期の何個ぶんか） */
-const WAVE_CYCLES = 2.2;
+const WAVE_CYCLES = 3.4;
 /** 接地判定の狭さ。小さいほど「潰れる瞬間」が短く鋭くなる */
 const SQUASH_SIGMA = 0.035;
 /** 接地時に潰れる深さ */
-const SQUASH_DEPTH = 0.55;
+const SQUASH_DEPTH = 0.4;
 /** 離陸・着地の直前直後に伸びる深さ */
-const STRETCH_DEPTH = 0.3;
+const STRETCH_DEPTH = 0.18;
 /** 位置と位相に足す、格子っぽさを崩すための小さな乱れ */
-const JITTER_POS = 0.07;
+const JITTER_POS = 0.03;
 const JITTER_PHASE = 0.025;
 
 /** 床の半径 */
-const FLOOR_RADIUS = 9;
+const FLOOR_RADIUS = 10.5;
 /** 対角線の本数（0 〜 2*(GRID-1)） */
 const DIAG_COUNT = 2 * (GRID - 1) + 1;
 
@@ -67,7 +68,7 @@ const wrap01 = (x: number): number => x - Math.floor(x);
 export const bounceGrid: SceneModule = {
   name: 'Bounce Grid',
   desc: '球のグリッドが斜めの波に乗って、次々に潰れては跳ね上がる。',
-  camera: { pos: [9, 15, 21], target: [0, 1.2, 0] },
+  camera: { pos: [8.8, 11.4, 8.8], target: [0, 1, 0] },
 
   build(root) {
     seed = 0.612;
@@ -105,6 +106,19 @@ export const bounceGrid: SceneModule = {
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.02;
     root.add(floor);
+
+    // 行・列の基準線。球の並びが格子だと一目で読めるようにする
+    const edge = half * SPACING + SPACING * 0.55;
+    const linePts: number[] = [];
+    for (let i = 0; i < GRID; i++) {
+      const c = (i - half) * SPACING;
+      linePts.push(-edge, 0.01, c, edge, 0.01, c);
+      linePts.push(c, 0.01, -edge, c, 0.01, edge);
+    }
+    const lineGeo = new THREE.BufferGeometry();
+    lineGeo.setAttribute('position', new THREE.Float32BufferAttribute(linePts, 3));
+    const lineMat = new THREE.LineBasicMaterial({ color: SURFACE, transparent: true, opacity: 0.5 });
+    root.add(new THREE.LineSegments(lineGeo, lineMat));
   },
 
   update(t) {
@@ -129,7 +143,7 @@ export const bounceGrid: SceneModule = {
       dummy.updateMatrix();
       mesh.setMatrixAt(idx, dummy.matrix);
 
-      const n = 0.32 + 0.4 * (y / AMPLITUDE);
+      const n = 0.4 + 0.2 * (y / AMPLITUDE);
       ember(color, n, hue, squash * 0.3);
       mesh.setColorAt(idx, color);
     }
