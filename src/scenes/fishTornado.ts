@@ -89,7 +89,8 @@ export const fishTornado: SceneModule = {
 
     // 魚体。八面体を前後に引き伸ばし、幅:高さ:全長 ≒ 0.3:0.5:1 の厚みのある紡錘形にする。
     // 平板にすると木の葉や紙片に見えてしまうので、左右を潰しすぎないこと。
-    // lookAt は -Z を進行方向へ向けるので、頭が -Z・尾が +Z 側になる。
+    // Object3D.lookAt は +Z 軸を対象へ向ける（-Z なのは Camera と Light）。
+    // したがって頭が +Z・尾が -Z 側になる。
     const body = new THREE.OctahedronGeometry(0.5);
     body.scale(FISH_LEN * 0.3, FISH_LEN * 0.52, FISH_LEN);
     school = new THREE.InstancedMesh(
@@ -103,7 +104,7 @@ export const fishTornado: SceneModule = {
     // 尾びれ。後端に薄い縦板を足すだけでシルエットが魚に寄る
     const tail = new THREE.OctahedronGeometry(0.5);
     tail.scale(FISH_LEN * 0.045, FISH_LEN * 0.5, FISH_LEN * 0.34);
-    tail.translate(0, 0, FISH_LEN * 0.55);
+    tail.translate(0, 0, -FISH_LEN * 0.55);
     fins = new THREE.InstancedMesh(
       tail,
       new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.3 }),
