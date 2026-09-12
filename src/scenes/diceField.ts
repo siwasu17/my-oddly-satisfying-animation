@@ -4,32 +4,29 @@ import { tone, tickers } from '../audio.ts';
 import { SURFACE, ember, emberColor, drift } from '../palette.ts';
 
 /**
- * 何が動くか: 格子の盤に並んだサイコロが、辺を軸にコトンと倒れて隣のマスへ移る。
- * 気持ちよさの芯: 立方体が辺で持ち上がって落ちる「間」と、そのたび入れ替わる目の面。
- *   一周し終えたサイコロは盤へすっと沈み、目を変えてまたせり上がってくる。
- * ループの周期: 1 手 1.2〜1.8 秒。各サイコロは 10〜18 手で沈降まで一巡し、位相はばらばら。
+ * 何が動くか: 格子の盤に置かれた 6 つの無地の立方体が、辺を軸にコトンと倒れて隣のマスへ移る。
+ * 気持ちよさの芯: 立方体が辺で持ち上がって落ちる「間」と、面の陰影が入れ替わる瞬間。
+ *   一周し終えた立方体は盤へすっと沈み、また同じマスからせり上がってくる。
+ * ループの周期: 1 手 1.2〜1.8 秒。各立方体は 8〜16 手で沈降まで一巡し、位相はばらばら。
  * カメラ: 盤全体が入る俯瞰。
- * 音: 着地に pluck（3 つに 1 つのサイコロだけ）、沈む瞬間に drop。
- * スコープ外: 目を揃えて消すパズル判定、サイコロ同士の衝突（各自 2x2 のブロック内を周回する）。
+ * 音: 着地に pluck（2 つに 1 つの立方体だけ）、沈む瞬間に drop。
+ * スコープ外: サイコロの目、立方体同士の衝突（各自 2x2 のブロック内を周回する）。
  */
 
 // ---- 調整する数値 ----
-const BLOCKS = 4; // 2x2 マスのブロック数。盤は BLOCKS*2 マス四方
+const BLOCKS_X = 3; // 横のブロック数（1 ブロック = 2x2 マス）
+const BLOCKS_Z = 2; // 奥行きのブロック数。立方体は BLOCKS_X * BLOCKS_Z 個
 const CELL = 2.3; // マスの一辺
-const DIE = 1.96; // サイコロの一辺
-const PIP_R = DIE * 0.088; // 目の半径
-const PIP_OFF = DIE * 0.26; // 目の面内オフセット
+const DIE = 1.96; // 立方体の一辺
 const DEPTH = DIE * 2.1; // 沈む深さ
 const ROLL_FRAC = 0.34; // 1 手のうち転がりに使う割合（残りは静止して「間」になる）
 const STEP_MIN = 1.2; // 1 手の秒数
 const STEP_VAR = 0.6;
-const BODY_N = 0.3; // サイコロ本体の色（暗い）
+const BODY_N = 0.34; // 立方体の色
 const BODY_VAR = 0.16;
-const PIP_N = 0.68; // 目の色（少し滲む明るさ）
 const SINK_GLOW = 0.2; // 沈むときに持ち上げる明度
 const LINE_N = 0.2; // 盤の罫線
-const COUNT = BLOCKS * BLOCKS;
-const PIPS = 21; // 1〜6 の目の合計
+const COUNT = BLOCKS_X * BLOCKS_Z;
 
 /** 1 個ぶんの周回路と姿勢。すべて build で決めて update からは読むだけ。 */
 interface Die {
@@ -47,7 +44,6 @@ interface Die {
 }
 
 const dice: Die[] = [];
-const pipLocal: THREE.Vector3[] = [];
 
 const dummy = new THREE.Object3D();
 const color = new THREE.Color();
@@ -55,85 +51,25 @@ const spin = new THREE.Quaternion();
 const rest = new THREE.Quaternion();
 const axis = new THREE.Vector3();
 const rel = new THREE.Vector3();
-const pipMat = new THREE.Matrix4();
-const pipOffset: THREE.Matrix4[] = [];
 
 let body: THREE.InstancedMesh;
-let pips: THREE.InstancedMesh;
 let landTicks: ((phase: number) => number)[] = [];
 let sinkTicks: ((phase: number) => number)[] = [];
 
 const smooth = (x: number): number => x * x * (3 - 2 * x);
 const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 
-/** 6 面ぶんの目を立方体のローカル座標に並べる。対面の和は 7。 */
-function buildPips(): void {
-  const faces: [THREE.Vector3, THREE.Vector3, THREE.Vector3, number][] = [
-    [new THREE.Vector3(0, 1, 0), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 1), 1],
-    [new THREE.Vector3(0, -1, 0), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, -1), 6],
-    [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 1, 0), 2],
-    [new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 1, 0), 5],
-    [new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), 3],
-    [new THREE.Vector3(0, 0, -1), new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 1, 0), 4],
-  ];
-  const spots: number[][][] = [
-    [[0, 0]],
-    [
-      [-1, -1],
-      [1, 1],
-    ],
-    [
-      [-1, -1],
-      [0, 0],
-      [1, 1],
-    ],
-    [
-      [-1, -1],
-      [-1, 1],
-      [1, -1],
-      [1, 1],
-    ],
-    [
-      [-1, -1],
-      [-1, 1],
-      [0, 0],
-      [1, -1],
-      [1, 1],
-    ],
-    [
-      [-1, -1],
-      [-1, 0],
-      [-1, 1],
-      [1, -1],
-      [1, 0],
-      [1, 1],
-    ],
-  ];
-  const depth = DIE * 0.5 - PIP_R * 0.3;
-  pipLocal.length = 0;
-  for (const [n, u, v, value] of faces) {
-    for (const [a, b] of spots[value - 1]) {
-      pipLocal.push(
-        new THREE.Vector3(
-          n.x * depth + u.x * a * PIP_OFF + v.x * b * PIP_OFF,
-          n.y * depth + u.y * a * PIP_OFF + v.y * b * PIP_OFF,
-          n.z * depth + u.z * a * PIP_OFF + v.z * b * PIP_OFF,
-        ),
-      );
-    }
-  }
-}
-
-/** サイコロ 1 個ぶんの周回路と、各手の姿勢を先に全部求めておく。 */
+/** 立方体 1 個ぶんの周回路と、各手の姿勢を先に全部求めておく。 */
 function buildDice(): void {
   let s = 0.317;
   const rnd = (): number => (s = (s * 9301 + 0.49297) % 1);
-  const half = BLOCKS - 0.5;
+  const halfX = BLOCKS_X - 0.5;
+  const halfZ = BLOCKS_Z - 0.5;
   const step = new THREE.Quaternion();
   dice.length = 0;
 
-  for (let bj = 0; bj < BLOCKS; bj++) {
-    for (let bi = 0; bi < BLOCKS; bi++) {
+  for (let bj = 0; bj < BLOCKS_Z; bj++) {
+    for (let bi = 0; bi < BLOCKS_X; bi++) {
       const c0 = bi * 2;
       const r0 = bj * 2;
       const corners = [
@@ -150,8 +86,8 @@ function buildDice(): void {
       const cz = new Float32Array(moves + 1);
       for (let m = 0; m <= moves; m++) {
         const c = corners[(start + turn * m) % 4];
-        cx[m] = (c[0] - half) * CELL;
-        cz[m] = (c[1] - half) * CELL;
+        cx[m] = (c[0] - halfX) * CELL;
+        cz[m] = (c[1] - halfZ) * CELL;
       }
 
       const dx = new Float32Array(moves);
@@ -176,7 +112,7 @@ function buildDice(): void {
         dx,
         dz,
         quats,
-        pan: (cx[0] / (BLOCKS * CELL)) * 0.7,
+        pan: (cx[0] / (BLOCKS_X * CELL)) * 0.7,
         note: 5 + (i % 6),
       });
     }
@@ -202,7 +138,7 @@ function place(d: Die, m: number, f: number): number {
   if (sinking) {
     dummy.quaternion.copy(d.quats[d.moves]);
   } else {
-    // 床下に隠れているあいだに、開始姿勢へ戻す（目が変わったように見える）
+    // 床下に隠れているあいだに、開始姿勢へ戻しておく
     rest.copy(d.quats[d.moves]).slerp(d.quats[0], clamp01(f / 0.42));
     dummy.quaternion.copy(rest);
   }
@@ -211,19 +147,19 @@ function place(d: Die, m: number, f: number): number {
 
 export const diceField: SceneModule = {
   name: 'Dice Field',
-  desc: 'マス目のサイコロが辺で倒れて隣へ移り、一周すると盤に沈んで目を変えて戻る。',
-  camera: { pos: [0, 10.5, 12.5], target: [0, 1, 0] },
+  desc: 'マス目に置かれた 6 つの立方体が辺で倒れて隣へ移り、一周すると盤に沈んでまたせり上がる。',
+  camera: { pos: [0, 7.2, 8.6], target: [0, 0.6, 0] },
 
   build(root) {
-    buildPips();
     buildDice();
     landTicks = tickers(COUNT);
     sinkTicks = tickers(COUNT);
 
-    const span = BLOCKS * 2 * CELL;
+    const spanX = BLOCKS_X * 2 * CELL;
+    const spanZ = BLOCKS_Z * 2 * CELL;
 
     const floor = new THREE.Mesh(
-      new THREE.BoxGeometry(span + CELL * 0.6, 0.8, span + CELL * 0.6),
+      new THREE.BoxGeometry(spanX + CELL * 0.6, 0.8, spanZ + CELL * 0.6),
       new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.62, metalness: 0.28 }),
     );
     floor.position.y = -0.4;
@@ -231,10 +167,13 @@ export const diceField: SceneModule = {
 
     // 盤の罫線。マス目が読めるだけの明るさに留める
     const pts: number[] = [];
-    for (let i = 0; i <= BLOCKS * 2; i++) {
-      const p = (i - BLOCKS) * CELL;
-      pts.push(-span / 2, 0.01, p, span / 2, 0.01, p);
-      pts.push(p, 0.01, -span / 2, p, 0.01, span / 2);
+    for (let i = 0; i <= BLOCKS_Z * 2; i++) {
+      const p = (i - BLOCKS_Z) * CELL;
+      pts.push(-spanX / 2, 0.01, p, spanX / 2, 0.01, p);
+    }
+    for (let i = 0; i <= BLOCKS_X * 2; i++) {
+      const p = (i - BLOCKS_X) * CELL;
+      pts.push(p, 0.01, -spanZ / 2, p, 0.01, spanZ / 2);
     }
     const lineGeo = new THREE.BufferGeometry();
     lineGeo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
@@ -245,25 +184,13 @@ export const diceField: SceneModule = {
       ),
     );
 
-    const dieGeo = new THREE.BoxGeometry(DIE, DIE, DIE);
     body = new THREE.InstancedMesh(
-      dieGeo,
+      new THREE.BoxGeometry(DIE, DIE, DIE),
       new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.28 }),
       COUNT,
     );
     body.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     root.add(body);
-
-    pips = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(PIP_R, 10, 8),
-      new THREE.MeshStandardMaterial({ roughness: 0.42, metalness: 0.1 }),
-      COUNT * PIPS,
-    );
-    pips.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    root.add(pips);
-
-    pipOffset.length = 0;
-    for (const p of pipLocal) pipOffset.push(new THREE.Matrix4().makeTranslation(p.x, p.y, p.z));
   },
 
   update(t) {
@@ -281,18 +208,9 @@ export const diceField: SceneModule = {
       body.setMatrixAt(i, dummy.matrix);
       ember(color, d.n, shift, glow);
       body.setColorAt(i, color);
-
-      ember(color, PIP_N, shift, glow);
-      for (let j = 0; j < PIPS; j++) {
-        pipMat.multiplyMatrices(dummy.matrix, pipOffset[j]);
-        pips.setMatrixAt(i * PIPS + j, pipMat);
-        pips.setColorAt(i * PIPS + j, color);
-      }
     }
     body.instanceMatrix.needsUpdate = true;
-    pips.instanceMatrix.needsUpdate = true;
     if (body.instanceColor) body.instanceColor.needsUpdate = true;
-    if (pips.instanceColor) pips.instanceColor.needsUpdate = true;
   },
 
   sound(t, _dt, sfx) {
@@ -301,9 +219,9 @@ export const diceField: SceneModule = {
       const per = d.moves + 2;
       const p = (t + d.off) / d.step;
 
-      // 着地は 1 手のうち ROLL_FRAC の位相。全部鳴らすと団子になるので 3 つに 1 つ
+      // 着地は 1 手のうち ROLL_FRAC の位相。全部鳴らすと団子になるので 2 つに 1 つ
       for (let c = landTicks[i](p - ROLL_FRAC); c > 0; c--) {
-        if (i % 3 !== 0) continue;
+        if (i % 2 !== 0) continue;
         const k = Math.floor(p - ROLL_FRAC);
         if (((k % per) + per) % per < d.moves) {
           sfx.pluck(tone(d.note), { gain: 0.19, decay: 1.1, pan: d.pan });
