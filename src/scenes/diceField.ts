@@ -4,18 +4,20 @@ import { tone, tickers } from '../audio.ts';
 import { SURFACE, ember, emberColor, drift } from '../palette.ts';
 
 /**
- * 何が動くか: 格子の盤に置かれた 6 つの無地の立方体が、辺を軸にコトンと倒れて隣のマスへ移る。
+ * 何が動くか: 広い格子の盤に散らばった 6 つの無地の立方体が、辺を軸にコトンと倒れて隣のマスへ移る。
  * 気持ちよさの芯: 立方体が辺で持ち上がって落ちる「間」と、面の陰影が入れ替わる瞬間。
  *   一周し終えた立方体は盤へすっと沈み、また同じマスからせり上がってくる。
  * ループの周期: 1 手 1.2〜1.8 秒。各立方体は 8〜16 手で沈降まで一巡し、位相はばらばら。
  * カメラ: 盤全体が入る俯瞰。
  * 音: 着地に pluck（2 つに 1 つの立方体だけ）、沈む瞬間に drop。
- * スコープ外: サイコロの目、立方体同士の衝突（各自 2x2 のブロック内を周回する）。
+ * スコープ外: サイコロの目、立方体同士の衝突（各自 2x2 のブロック内を周回し、ブロックは離れている）。
  */
 
 // ---- 調整する数値 ----
 const BLOCKS_X = 3; // 横のブロック数（1 ブロック = 2x2 マス）
 const BLOCKS_Z = 2; // 奥行きのブロック数。立方体は BLOCKS_X * BLOCKS_Z 個
+const GAP = 1; // ブロックとブロックのあいだの空きマス
+const MARGIN = 1; // 盤の外周に残す空きマス
 const CELL = 2.3; // マスの一辺
 const DIE = 1.96; // 立方体の一辺
 const DEPTH = DIE * 2.1; // 沈む深さ
@@ -27,6 +29,10 @@ const BODY_VAR = 0.16;
 const SINK_GLOW = 0.2; // 沈むときに持ち上げる明度
 const LINE_N = 0.2; // 盤の罫線
 const COUNT = BLOCKS_X * BLOCKS_Z;
+const CELLS_X = BLOCKS_X * 2 + (BLOCKS_X - 1) * GAP + MARGIN * 2; // 盤のマス数
+const CELLS_Z = BLOCKS_Z * 2 + (BLOCKS_Z - 1) * GAP + MARGIN * 2;
+const SPAN_X = CELLS_X * CELL; // 盤の一辺
+const SPAN_Z = CELLS_Z * CELL;
 
 /** 1 個ぶんの周回路と姿勢。すべて build で決めて update からは読むだけ。 */
 interface Die {
@@ -63,15 +69,15 @@ const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 function buildDice(): void {
   let s = 0.317;
   const rnd = (): number => (s = (s * 9301 + 0.49297) % 1);
-  const halfX = BLOCKS_X - 0.5;
-  const halfZ = BLOCKS_Z - 0.5;
+  const halfX = (CELLS_X - 1) / 2; // 盤の中心に来るマスの番号
+  const halfZ = (CELLS_Z - 1) / 2;
   const step = new THREE.Quaternion();
   dice.length = 0;
 
   for (let bj = 0; bj < BLOCKS_Z; bj++) {
     for (let bi = 0; bi < BLOCKS_X; bi++) {
-      const c0 = bi * 2;
-      const r0 = bj * 2;
+      const c0 = MARGIN + bi * (2 + GAP);
+      const r0 = MARGIN + bj * (2 + GAP);
       const corners = [
         [c0, r0],
         [c0 + 1, r0],
@@ -112,7 +118,7 @@ function buildDice(): void {
         dx,
         dz,
         quats,
-        pan: (cx[0] / (BLOCKS_X * CELL)) * 0.7,
+        pan: (cx[0] / (SPAN_X * 0.5)) * 0.7,
         note: 5 + (i % 6),
       });
     }
@@ -147,19 +153,16 @@ function place(d: Die, m: number, f: number): number {
 
 export const diceField: SceneModule = {
   name: 'Dice Field',
-  desc: 'マス目に置かれた 6 つの立方体が辺で倒れて隣へ移り、一周すると盤に沈んでまたせり上がる。',
-  camera: { pos: [0, 7.2, 8.6], target: [0, 0.6, 0] },
+  desc: '広い盤に散らばった 6 つの立方体が辺で倒れて隣へ移り、一周すると盤に沈んでまたせり上がる。',
+  camera: { pos: [0, 11.5, 13.8], target: [0, 0.6, 0] },
 
   build(root) {
     buildDice();
     landTicks = tickers(COUNT);
     sinkTicks = tickers(COUNT);
 
-    const spanX = BLOCKS_X * 2 * CELL;
-    const spanZ = BLOCKS_Z * 2 * CELL;
-
     const floor = new THREE.Mesh(
-      new THREE.BoxGeometry(spanX + CELL * 0.6, 0.8, spanZ + CELL * 0.6),
+      new THREE.BoxGeometry(SPAN_X + CELL * 0.6, 0.8, SPAN_Z + CELL * 0.6),
       new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.62, metalness: 0.28 }),
     );
     floor.position.y = -0.4;
@@ -167,13 +170,13 @@ export const diceField: SceneModule = {
 
     // 盤の罫線。マス目が読めるだけの明るさに留める
     const pts: number[] = [];
-    for (let i = 0; i <= BLOCKS_Z * 2; i++) {
-      const p = (i - BLOCKS_Z) * CELL;
-      pts.push(-spanX / 2, 0.01, p, spanX / 2, 0.01, p);
+    for (let i = 0; i <= CELLS_Z; i++) {
+      const p = (i - CELLS_Z / 2) * CELL;
+      pts.push(-SPAN_X / 2, 0.01, p, SPAN_X / 2, 0.01, p);
     }
-    for (let i = 0; i <= BLOCKS_X * 2; i++) {
-      const p = (i - BLOCKS_X) * CELL;
-      pts.push(p, 0.01, -spanZ / 2, p, 0.01, spanZ / 2);
+    for (let i = 0; i <= CELLS_X; i++) {
+      const p = (i - CELLS_X / 2) * CELL;
+      pts.push(p, 0.01, -SPAN_Z / 2, p, 0.01, SPAN_Z / 2);
     }
     const lineGeo = new THREE.BufferGeometry();
     lineGeo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
