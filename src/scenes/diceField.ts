@@ -4,50 +4,55 @@ import { tone, tickers } from '../audio.ts';
 import { SURFACE, ember, emberColor, drift } from '../palette.ts';
 
 /**
- * 何が動くか: 格子の盤に並んだサイコロが、辺を軸にコトンと倒れて隣のマスへ移る。
- * 気持ちよさの芯: 立方体が辺で持ち上がって落ちる「間」と、そのたび入れ替わる目の面。
- *   一周し終えたサイコロは盤へすっと沈み、目を変えてまたせり上がってくる。
- * ループの周期: 1 手 1.2〜1.8 秒。各サイコロは 10〜18 手で沈降まで一巡し、位相はばらばら。
+ * 何が動くか: 広い格子の盤に散らばった 6 つの無地の立方体が、辺を軸にコトンと倒れて
+ *   気まぐれな向きの隣マスへ移る。行き先は毎手ランダムで、来た道を戻ることもある。
+ * 気持ちよさの芯: 立方体が辺で持ち上がって落ちる「間」と、次にどっちへ行くか読めないこと。
+ *   歩き終えた立方体は盤へすっと沈み、なわばりのどこかからまたせり上がってくる。
+ * ループの周期: 1 手 1.0〜1.9 秒。各立方体は 12〜21 手で沈降まで一巡し、位相はばらばら。
  * カメラ: 盤全体が入る俯瞰。
- * 音: 着地に pluck（3 つに 1 つのサイコロだけ）、沈む瞬間に drop。
- * スコープ外: 目を揃えて消すパズル判定、サイコロ同士の衝突（各自 2x2 のブロック内を周回する）。
+ * 音: 着地に pluck（2 つに 1 つの立方体だけ・倒れた先のマスで左右に振る）、沈む瞬間に drop。
+ * スコープ外: サイコロの目、立方体同士の衝突（各自 3x3 のなわばりから出ないので重ならない）。
  */
 
 // ---- 調整する数値 ----
-const BLOCKS = 4; // 2x2 マスのブロック数。盤は BLOCKS*2 マス四方
+const BLOCKS_X = 3; // 横のなわばり数
+const BLOCKS_Z = 2; // 奥行きのなわばり数。立方体は BLOCKS_X * BLOCKS_Z 個
+const ROOM = 3; // なわばりの一辺のマス数。この中だけを歩くので互いに重ならない
+const MARGIN = 1; // 盤の外周に残す空きマス
 const CELL = 2.3; // マスの一辺
-const DIE = 1.96; // サイコロの一辺
-const PIP_R = DIE * 0.088; // 目の半径
-const PIP_OFF = DIE * 0.26; // 目の面内オフセット
+const DIE = CELL; // 立方体の一辺。マス目と同じにして、1 マスをちょうど埋める
 const DEPTH = DIE * 2.1; // 沈む深さ
 const ROLL_FRAC = 0.34; // 1 手のうち転がりに使う割合（残りは静止して「間」になる）
-const STEP_MIN = 1.2; // 1 手の秒数
-const STEP_VAR = 0.6;
-const BODY_N = 0.3; // サイコロ本体の色（暗い）
+const STEP_MIN = 1.0; // 1 手の秒数
+const STEP_VAR = 0.9;
+const MOVES_MIN = 12; // 沈むまでの手数
+const MOVES_VAR = 10;
+const BACKTRACK = 0.18; // 来た道をそのまま引き返す確率
+const BODY_N = 0.34; // 立方体の色
 const BODY_VAR = 0.16;
-const PIP_N = 0.68; // 目の色（少し滲む明るさ）
 const SINK_GLOW = 0.2; // 沈むときに持ち上げる明度
 const LINE_N = 0.2; // 盤の罫線
-const COUNT = BLOCKS * BLOCKS;
-const PIPS = 21; // 1〜6 の目の合計
+const COUNT = BLOCKS_X * BLOCKS_Z;
+const CELLS_X = BLOCKS_X * ROOM + MARGIN * 2; // 盤のマス数
+const CELLS_Z = BLOCKS_Z * ROOM + MARGIN * 2;
+const SPAN_X = CELLS_X * CELL; // 盤の一辺
+const SPAN_Z = CELLS_Z * CELL;
 
 /** 1 個ぶんの周回路と姿勢。すべて build で決めて update からは読むだけ。 */
 interface Die {
   n: number; // 本体の色
   step: number; // 1 手の秒数
   off: number; // 位相オフセット
-  moves: number; // 沈むまでの手数（4 の倍数なので開始マスへ戻る）
+  moves: number; // 沈むまでの手数
   cx: Float32Array; // 各手の開始マス中心
   cz: Float32Array;
   dx: Float32Array; // 各手の進む向き
   dz: Float32Array;
   quats: THREE.Quaternion[]; // 各手の開始姿勢
-  pan: number;
   note: number;
 }
 
 const dice: Die[] = [];
-const pipLocal: THREE.Vector3[] = [];
 
 const dummy = new THREE.Object3D();
 const color = new THREE.Color();
@@ -55,111 +60,82 @@ const spin = new THREE.Quaternion();
 const rest = new THREE.Quaternion();
 const axis = new THREE.Vector3();
 const rel = new THREE.Vector3();
-const pipMat = new THREE.Matrix4();
-const pipOffset: THREE.Matrix4[] = [];
 
 let body: THREE.InstancedMesh;
-let pips: THREE.InstancedMesh;
 let landTicks: ((phase: number) => number)[] = [];
 let sinkTicks: ((phase: number) => number)[] = [];
 
+const DIRS = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
+
 const smooth = (x: number): number => x * x * (3 - 2 * x);
 const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
+/** 盤の左右どちらで鳴ったか。 */
+const panAt = (x: number): number => (x / (SPAN_X * 0.5)) * 0.7;
 
-/** 6 面ぶんの目を立方体のローカル座標に並べる。対面の和は 7。 */
-function buildPips(): void {
-  const faces: [THREE.Vector3, THREE.Vector3, THREE.Vector3, number][] = [
-    [new THREE.Vector3(0, 1, 0), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 1), 1],
-    [new THREE.Vector3(0, -1, 0), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, -1), 6],
-    [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, -1), new THREE.Vector3(0, 1, 0), 2],
-    [new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 1, 0), 5],
-    [new THREE.Vector3(0, 0, 1), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), 3],
-    [new THREE.Vector3(0, 0, -1), new THREE.Vector3(-1, 0, 0), new THREE.Vector3(0, 1, 0), 4],
-  ];
-  const spots: number[][][] = [
-    [[0, 0]],
-    [
-      [-1, -1],
-      [1, 1],
-    ],
-    [
-      [-1, -1],
-      [0, 0],
-      [1, 1],
-    ],
-    [
-      [-1, -1],
-      [-1, 1],
-      [1, -1],
-      [1, 1],
-    ],
-    [
-      [-1, -1],
-      [-1, 1],
-      [0, 0],
-      [1, -1],
-      [1, 1],
-    ],
-    [
-      [-1, -1],
-      [-1, 0],
-      [-1, 1],
-      [1, -1],
-      [1, 0],
-      [1, 1],
-    ],
-  ];
-  const depth = DIE * 0.5 - PIP_R * 0.3;
-  pipLocal.length = 0;
-  for (const [n, u, v, value] of faces) {
-    for (const [a, b] of spots[value - 1]) {
-      pipLocal.push(
-        new THREE.Vector3(
-          n.x * depth + u.x * a * PIP_OFF + v.x * b * PIP_OFF,
-          n.y * depth + u.y * a * PIP_OFF + v.y * b * PIP_OFF,
-          n.z * depth + u.z * a * PIP_OFF + v.z * b * PIP_OFF,
-        ),
-      );
-    }
-  }
+/** 固定シードの乱数（mulberry32）。歩き方を決めるので、質の悪い LCG だと癖が出る。 */
+function makeRng(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let x = Math.imul(s ^ (s >>> 15), 1 | s);
+    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
-/** サイコロ 1 個ぶんの周回路と、各手の姿勢を先に全部求めておく。 */
+/** 立方体 1 個ぶんの歩みと、各手の姿勢を先に全部求めておく。 */
 function buildDice(): void {
-  let s = 0.317;
-  const rnd = (): number => (s = (s * 9301 + 0.49297) % 1);
-  const half = BLOCKS - 0.5;
+  const rnd = makeRng(0x51ced1ce);
+  const halfX = (CELLS_X - 1) / 2; // 盤の中心に来るマス番号
+  const halfZ = (CELLS_Z - 1) / 2;
   const step = new THREE.Quaternion();
+  const open: number[][] = [];
+  const fwd: number[][] = [];
   dice.length = 0;
 
-  for (let bj = 0; bj < BLOCKS; bj++) {
-    for (let bi = 0; bi < BLOCKS; bi++) {
-      const c0 = bi * 2;
-      const r0 = bj * 2;
-      const corners = [
-        [c0, r0],
-        [c0 + 1, r0],
-        [c0 + 1, r0 + 1],
-        [c0, r0 + 1],
-      ];
-      const turn = rnd() < 0.5 ? 1 : 3; // 時計回りか反時計回りか
-      const start = Math.floor(rnd() * 4) % 4;
-      const moves = 8 + Math.floor(rnd() * 2.99) * 4; // 8 / 12 / 16 手で開始マスへ戻る
+  for (let bj = 0; bj < BLOCKS_Z; bj++) {
+    for (let bi = 0; bi < BLOCKS_X; bi++) {
+      const c0 = MARGIN + bi * ROOM; // なわばりの左奥のマス
+      const r0 = MARGIN + bj * ROOM;
+      const moves = MOVES_MIN + Math.floor(rnd() * MOVES_VAR);
 
       const cx = new Float32Array(moves + 1);
       const cz = new Float32Array(moves + 1);
-      for (let m = 0; m <= moves; m++) {
-        const c = corners[(start + turn * m) % 4];
-        cx[m] = (c[0] - half) * CELL;
-        cz[m] = (c[1] - half) * CELL;
-      }
-
       const dx = new Float32Array(moves);
       const dz = new Float32Array(moves);
       const quats: THREE.Quaternion[] = [new THREE.Quaternion()];
+
+      let c = c0 + Math.floor(rnd() * ROOM);
+      let r = r0 + Math.floor(rnd() * ROOM);
+      cx[0] = (c - halfX) * CELL;
+      cz[0] = (r - halfZ) * CELL;
+
       for (let m = 0; m < moves; m++) {
-        dx[m] = (cx[m + 1] - cx[m]) / CELL;
-        dz[m] = (cz[m + 1] - cz[m]) / CELL;
+        // なわばりから出ない向きを集める。引き返しは別枠にして、たまにだけ混ぜる
+        open.length = 0;
+        fwd.length = 0;
+        for (const dir of DIRS) {
+          const nc = c + dir[0];
+          const nr = r + dir[1];
+          if (nc < c0 || nc >= c0 + ROOM || nr < r0 || nr >= r0 + ROOM) continue;
+          open.push(dir);
+          if (m === 0 || dir[0] !== -dx[m - 1] || dir[1] !== -dz[m - 1]) fwd.push(dir);
+        }
+        const pool = fwd.length > 0 && rnd() > BACKTRACK ? fwd : open;
+        const dir = pool[Math.floor(rnd() * pool.length)];
+
+        dx[m] = dir[0];
+        dz[m] = dir[1];
+        c += dir[0];
+        r += dir[1];
+        cx[m + 1] = (c - halfX) * CELL;
+        cz[m + 1] = (r - halfZ) * CELL;
+
         axis.set(dz[m], 0, -dx[m]);
         step.setFromAxisAngle(axis, Math.PI / 2);
         quats.push(quats[m].clone().premultiply(step));
@@ -176,7 +152,6 @@ function buildDice(): void {
         dx,
         dz,
         quats,
-        pan: (cx[0] / (BLOCKS * CELL)) * 0.7,
         note: 5 + (i % 6),
       });
     }
@@ -198,11 +173,13 @@ function place(d: Die, m: number, f: number): number {
   const e = smooth(f);
   const sinking = m === d.moves;
   const drop = sinking ? e : 1 - e;
-  dummy.position.set(d.cx[0], half - DEPTH * drop, d.cz[0]);
+  // 沈むのは歩き終えたマス、出てくるのは歩き出しのマス
+  const at = sinking ? d.moves : 0;
+  dummy.position.set(d.cx[at], half - DEPTH * drop, d.cz[at]);
   if (sinking) {
     dummy.quaternion.copy(d.quats[d.moves]);
   } else {
-    // 床下に隠れているあいだに、開始姿勢へ戻す（目が変わったように見える）
+    // 床下に隠れているあいだに、歩き出しのマスと姿勢へ戻しておく
     rest.copy(d.quats[d.moves]).slerp(d.quats[0], clamp01(f / 0.42));
     dummy.quaternion.copy(rest);
   }
@@ -211,19 +188,16 @@ function place(d: Die, m: number, f: number): number {
 
 export const diceField: SceneModule = {
   name: 'Dice Field',
-  desc: 'マス目のサイコロが辺で倒れて隣へ移り、一周すると盤に沈んで目を変えて戻る。',
-  camera: { pos: [0, 10.5, 12.5], target: [0, 1, 0] },
+  desc: '広い盤に散らばった 6 つの立方体が、辺で倒れて気まぐれな隣のマスへ移り、やがて盤に沈む。',
+  camera: { pos: [0, 14.8, 17.8], target: [0, 0.4, 0] },
 
   build(root) {
-    buildPips();
     buildDice();
     landTicks = tickers(COUNT);
     sinkTicks = tickers(COUNT);
 
-    const span = BLOCKS * 2 * CELL;
-
     const floor = new THREE.Mesh(
-      new THREE.BoxGeometry(span + CELL * 0.6, 0.8, span + CELL * 0.6),
+      new THREE.BoxGeometry(SPAN_X + CELL * 0.6, 0.8, SPAN_Z + CELL * 0.6),
       new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.62, metalness: 0.28 }),
     );
     floor.position.y = -0.4;
@@ -231,10 +205,13 @@ export const diceField: SceneModule = {
 
     // 盤の罫線。マス目が読めるだけの明るさに留める
     const pts: number[] = [];
-    for (let i = 0; i <= BLOCKS * 2; i++) {
-      const p = (i - BLOCKS) * CELL;
-      pts.push(-span / 2, 0.01, p, span / 2, 0.01, p);
-      pts.push(p, 0.01, -span / 2, p, 0.01, span / 2);
+    for (let i = 0; i <= CELLS_Z; i++) {
+      const p = (i - CELLS_Z / 2) * CELL;
+      pts.push(-SPAN_X / 2, 0.01, p, SPAN_X / 2, 0.01, p);
+    }
+    for (let i = 0; i <= CELLS_X; i++) {
+      const p = (i - CELLS_X / 2) * CELL;
+      pts.push(p, 0.01, -SPAN_Z / 2, p, 0.01, SPAN_Z / 2);
     }
     const lineGeo = new THREE.BufferGeometry();
     lineGeo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
@@ -245,25 +222,13 @@ export const diceField: SceneModule = {
       ),
     );
 
-    const dieGeo = new THREE.BoxGeometry(DIE, DIE, DIE);
     body = new THREE.InstancedMesh(
-      dieGeo,
+      new THREE.BoxGeometry(DIE, DIE, DIE),
       new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.28 }),
       COUNT,
     );
     body.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     root.add(body);
-
-    pips = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(PIP_R, 10, 8),
-      new THREE.MeshStandardMaterial({ roughness: 0.42, metalness: 0.1 }),
-      COUNT * PIPS,
-    );
-    pips.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    root.add(pips);
-
-    pipOffset.length = 0;
-    for (const p of pipLocal) pipOffset.push(new THREE.Matrix4().makeTranslation(p.x, p.y, p.z));
   },
 
   update(t) {
@@ -281,18 +246,9 @@ export const diceField: SceneModule = {
       body.setMatrixAt(i, dummy.matrix);
       ember(color, d.n, shift, glow);
       body.setColorAt(i, color);
-
-      ember(color, PIP_N, shift, glow);
-      for (let j = 0; j < PIPS; j++) {
-        pipMat.multiplyMatrices(dummy.matrix, pipOffset[j]);
-        pips.setMatrixAt(i * PIPS + j, pipMat);
-        pips.setColorAt(i * PIPS + j, color);
-      }
     }
     body.instanceMatrix.needsUpdate = true;
-    pips.instanceMatrix.needsUpdate = true;
     if (body.instanceColor) body.instanceColor.needsUpdate = true;
-    if (pips.instanceColor) pips.instanceColor.needsUpdate = true;
   },
 
   sound(t, _dt, sfx) {
@@ -301,18 +257,19 @@ export const diceField: SceneModule = {
       const per = d.moves + 2;
       const p = (t + d.off) / d.step;
 
-      // 着地は 1 手のうち ROLL_FRAC の位相。全部鳴らすと団子になるので 3 つに 1 つ
+      // 着地は 1 手のうち ROLL_FRAC の位相。全部鳴らすと団子になるので 2 つに 1 つ
       for (let c = landTicks[i](p - ROLL_FRAC); c > 0; c--) {
-        if (i % 3 !== 0) continue;
+        if (i % 2 !== 0) continue;
         const k = Math.floor(p - ROLL_FRAC);
-        if (((k % per) + per) % per < d.moves) {
-          sfx.pluck(tone(d.note), { gain: 0.19, decay: 1.1, pan: d.pan });
+        const mm = ((k % per) + per) % per;
+        if (mm < d.moves) {
+          sfx.pluck(tone(d.note), { gain: 0.19, decay: 1.1, pan: panAt(d.cx[mm + 1]) });
         }
       }
       for (let c = sinkTicks[i](p); c > 0; c--) {
         const k = Math.floor(p);
         if (((k % per) + per) % per === d.moves) {
-          sfx.drop(tone(d.note - 5), { gain: 0.26, decay: 0.7, pan: d.pan });
+          sfx.drop(tone(d.note - 5), { gain: 0.26, decay: 0.7, pan: panAt(d.cx[d.moves]) });
         }
       }
     }
