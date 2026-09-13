@@ -6,20 +6,33 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
 /**
  * 百鬼夜行。
  *
- * 闇に浮かぶ環状の夜道を、提灯を提げた百体の妖怪がひたすら練り歩く。
- * 道は円ではなく、半径と高さに整数倍の波を重ねた閉曲線なので、
- * 行列は膨らんだり窄まったり、丘を越えて上下しながら、必ず元の場所へ帰ってくる。
+ * 何が動くか: 闇に浮かぶ環状の夜道を、提灯を提げた妖怪の行列がひたすら練り歩く。
+ * 道は円ではなく、半径と高さに整数倍の波を重ねた閉曲線なので、行列は膨らんだり
+ * 窄まったり、丘を越えて上下しながら、必ず元の場所へ帰ってくる。
+ * 気持ちよさの芯: 同じものがひとつも並んでいないのに、灯りの連なりとしては
+ * 途切れないところ。背丈も体型も頭のかたちも提灯を提げる側もばらばらの一群が、
+ * ひと続きの帯として丘を越えていく。
+ * ループの周期: およそ 54 秒で一周。
+ * カメラ: 環の全周が入るぎりぎりまで寄せて、手前の数体のかたちが読める高さに置く。
+ * 音: 手前の鳥居をくぐるたびに遠くで鈴が鳴り、底に地鳴りを敷く。
+ * スコープ外: 顔の造作、手足の関節、名前の付く個別の妖怪。体は衣・頭・角・笠・棹の
+ * 5 パーツの組み合わせだけで作り、3 つの型と体型・明度の振れで「同じものが
+ * 並んでいない」と読ませるところまでを担う。群れの相互作用も扱わない
+ * （並びは道のパラメータの関数なので、追い越しも詰まりも生まれない）。
  *
  * 一体が持っているのは「道のどこにいるか」だけで、位置も向きも毎フレーム
  * その 1 つの式から作り直す。前後の間隔をわずかにばらしてあるので、
  * 列は詰まったり途切れたりしながらも、灯りのひと連なりとしては崩れない。
  * 行列と一緒に 3 つの灯りが動いていて、通り過ぎたところだけ道が明るむ。
- *
- * 一周はおよそ 54 秒。手前の鳥居をくぐるたびに、遠くで鈴が鳴る。
  */
 
-/** 頭数。名前のとおり百。 */
-const COUNT = 100;
+/**
+ * 頭数。百鬼と言いつつ 60 体しかいない。
+ * 環の全周を画面へ収めたまま一体のかたちを読ませるには、数を減らして
+ * 間隔を空けるしかなかった。100 体だと粒が 10〜20px にしかならず、
+ * 型を作り分けても階調のばらつきにしか見えない。
+ */
+const COUNT = 60;
 /** 行列が道を一周するのにかかる秒数。 */
 const LAP = 54;
 /** 道の基準半径。 */
@@ -30,6 +43,14 @@ const ROAD_W = 1.7;
 const SEG = 240;
 /** 提灯を提げる高さ（体の大きさに比例する）。 */
 const LANTERN_Y = 1.05;
+/** 棹の付け根（肩）の高さ。同じく体の大きさに比例する。 */
+const SHOULDER_Y = 0.74;
+/**
+ * 棹が体から横へ張り出す量。提灯はこの先にぶら下がる。
+ * 体の半径（0.42）より大きく取らないと、提灯が衣のシルエットに埋まって
+ * 「提げている」に見えない。
+ */
+const REACH = 0.58;
 /** 行列と一緒に動く灯りの数。 */
 const LAMPS = 3;
 /**
@@ -40,6 +61,26 @@ const GATE = 0.0375;
 /** 何体おきに音を鳴らすか。全部鳴らすと団子になる。 */
 const SOUND_EVERY = 4;
 
+/**
+ * 妖怪ごとに持つ値の数。
+ * [道の位置, 道幅方向のずれ, 背丈, 歩調, 位相, 横幅の倍率, 提げる側, 型, 衣の明度]
+ */
+const STRIDE = 9;
+
+/**
+ * 型ごとの頭の大きさ（頭のジオメトリ半径への倍率）。
+ * 0 = 笠をかぶった者、1 = 二本角の者、2 = 頭でっかち。
+ *
+ * 3 つの型は「頭の上に何が出ているか」で分けてある。遠景で効くのは
+ * 面の明暗ではなく輪郭の変化なので、頭の大きさだけを変えても差が読めない。
+ * 笠は横へ、角は上へ、大頭は丸く——輪郭の出方を型ごとに別方向へ振っている。
+ */
+const HEAD_MUL = [0.95, 1.15, 2.3];
+/** 頭のジオメトリ半径。倍率はここに掛かる。 */
+const HEAD_R = 0.2;
+/** 角が頭の中心から左右へ開く量（頭の半径に対する割合）。 */
+const HORN_SPREAD = 0.8;
+
 const TAU = Math.PI * 2;
 /** 進行方向を数値微分で拾うときの刻み。 */
 const DU = 0.0015;
@@ -48,11 +89,16 @@ const dummy = new THREE.Object3D();
 const color = new THREE.Color();
 const here = new THREE.Vector3();
 const ahead = new THREE.Vector3();
+/** 棹の長さを測るための作業用。 */
+const arm = new THREE.Vector3();
 
-/** 妖怪ごとの [道の位置, 道幅方向のずれ, 大きさ, 歩調, 位相] */
-const oni = new Float32Array(COUNT * 5);
+const oni = new Float32Array(COUNT * STRIDE);
 
 let bodies: THREE.InstancedMesh;
+let heads: THREE.InstancedMesh;
+let horns: THREE.InstancedMesh;
+let hats: THREE.InstancedMesh;
+let poles: THREE.InstancedMesh;
 let lanterns: THREE.InstancedMesh;
 let lamps: THREE.PointLight[] = [];
 
@@ -160,43 +206,92 @@ function buildGate(): THREE.Group {
 /** 提灯を提げた妖怪の行列が、うねる夜道をどこまでも巡っていく。 */
 export const nightParade: SceneModule = {
   name: 'Night Parade',
-  desc: '百の提灯がひと連なりになって、闇の環をゆっくり練り歩く。',
+  desc: '提灯を提げた妖怪たちが、ひと連なりになって闇の環を練り歩く。',
   // 俯瞰しすぎると鳥居が潰れるので、環が見える高さぎりぎりまで下げている
-  camera: { pos: [0, 11, 33], target: [0, 1.6, 0] },
+  camera: { pos: [0, 9.5, 31], target: [0, 1.8, 0] },
 
   build(root) {
     ticks = tickers(COUNT);
     tickWind = ticker();
     dummy.rotation.order = 'YXZ';
 
-    // 固定シード。開き直しても同じ行列になる
+    // 固定シード。開き直しても同じ顔ぶれの行列になる
     let s = 0.4137;
     const rnd = (): number => (s = (s * 9301 + 0.49297) % 1);
 
     for (let i = 0; i < COUNT; i++) {
-      const o = i * 5;
+      const o = i * STRIDE;
       // 等間隔を基本にしつつ前後へ散らすと、詰まりと隙間ができて行列らしくなる
       oni[o] = (i + rnd() * 0.6 - 0.3) / COUNT;
       oni[o + 1] = (rnd() * 2 - 1) * (ROAD_W - 0.5);
-      oni[o + 2] = 0.6 + rnd() * 0.66;
+      const size = 0.72 + rnd() * 0.8;
+      oni[o + 2] = size;
       oni[o + 3] = 5.0 + rnd() * 2.8;
       oni[o + 4] = rnd() * TAU;
+      // 背丈と横幅を逆に振る。背の高いものは痩せ、低いものは横に広がる
+      oni[o + 5] = 1.5 - 0.72 * ((size - 0.72) / 0.8) + (rnd() * 0.24 - 0.12);
+      // 提灯を提げる側。左右に割れると、列が一方向へ揃わない
+      oni[o + 6] = rnd() < 0.5 ? -1 : 1;
+      const k = rnd();
+      oni[o + 7] = k < 0.3 ? 1 : k < 0.52 ? 2 : 0;
+      // 衣の明度のオフセット。沈んだ衣と少し浮いた衣が混ざる
+      oni[o + 8] = rnd() * 0.15 - 0.05;
     }
+
+    const cloth = new THREE.MeshStandardMaterial({
+      roughness: 0.86,
+      metalness: 0.1,
+      flatShading: true,
+    });
 
     // 五角錐にしておくと、衣の折り目のような陰影が出る
     const body = new THREE.ConeGeometry(0.42, 1.15, 5);
     body.translate(0, 0.575, 0);
-    bodies = new THREE.InstancedMesh(
-      body,
-      new THREE.MeshStandardMaterial({ roughness: 0.86, metalness: 0.1, flatShading: true }),
-      COUNT,
-    );
+    bodies = new THREE.InstancedMesh(body, cloth, COUNT);
     bodies.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     root.add(bodies);
 
+    // 頭。衣と同じ材で、大きさだけを型で変える
+    heads = new THREE.InstancedMesh(new THREE.SphereGeometry(HEAD_R, 8, 6), cloth, COUNT);
+    heads.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    root.add(heads);
+
+    // 角。型 1 の頭に 2 本。他の型は scale 0 にして畳んでおく
+    const horn = new THREE.ConeGeometry(0.09, 0.78, 4);
+    horn.translate(0, 0.39, 0);
+    horns = new THREE.InstancedMesh(horn, cloth, COUNT * 2);
+    horns.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    root.add(horns);
+
+    // 笠。型 0 の頭に載せる。輪郭が横へ広がるので、遠目でも角と取り違えない。
+    // ただし体高が 1.3〜1.75 しかないので、笠の直径がそれに並ぶと胴と一体化して
+    // 「キノコ」に読めてしまう。半径は体の半径をわずかに超える程度に留める
+    const hat = new THREE.ConeGeometry(0.34, 0.24, 8);
+    hat.translate(0, 0.12, 0);
+    hats = new THREE.InstancedMesh(hat, cloth, COUNT);
+    hats.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    root.add(hats);
+
+    // 棹。肩から提灯へ渡して、灯りが体につながっていることを見せる。
+    // 細くすると遠景で 1px を割って消えるので、太さは衣に対して十分取り、
+    // 提灯の残り火を移したくらいの自発光を持たせて輪郭を残す
+    poles = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(0.085, 0.085, 1),
+      new THREE.MeshStandardMaterial({
+        color: emberColor(0.22),
+        emissive: emberColor(0.34),
+        emissiveIntensity: 0.55,
+        roughness: 0.7,
+        metalness: 0.2,
+      }),
+      COUNT,
+    );
+    poles.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    root.add(poles);
+
     // 提灯は光そのものなので、陰影を付けずブルームに拾わせる
     lanterns = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(0.17, 10, 8),
+      new THREE.SphereGeometry(0.16, 10, 8),
       new THREE.MeshBasicMaterial(),
       COUNT,
     );
@@ -228,8 +323,12 @@ export const nightParade: SceneModule = {
     const head = t / LAP;
 
     for (let i = 0; i < COUNT; i++) {
-      const o = i * 5;
+      const o = i * STRIDE;
       const size = oni[o + 2]!;
+      const wide = oni[o + 5]!;
+      const hand = oni[o + 6]!;
+      const kind = oni[o + 7]!;
+      const headMul = HEAD_MUL[kind]!;
       const gait = t * oni[o + 3]! + oni[o + 4]!;
 
       const u = head + oni[o]!;
@@ -248,40 +347,93 @@ export const nightParade: SceneModule = {
       const x = here.x + nx * side;
       const y = here.y + bob;
       const z = here.z + nz * side;
+      const yaw = Math.atan2(tx, tz);
 
+      // 衣。背丈と横幅を別々に掛けるので、痩せた背高と低い横広が混ざる
       dummy.position.set(x, y, z);
-      dummy.rotation.y = Math.atan2(tx, tz);
-      dummy.rotation.x = -0.07 - Math.sin(gait * 2) * 0.05; // 前かがみに、一歩ごとに頷く
-      dummy.rotation.z = Math.sin(gait) * 0.1; // 左右の揺れ
-      dummy.scale.setScalar(size);
+      dummy.rotation.set(
+        -0.07 - Math.sin(gait * 2) * 0.05, // 前かがみに、一歩ごとに頷く
+        yaw,
+        Math.sin(gait) * 0.1, // 左右の揺れ
+      );
+      dummy.scale.set(size * wide, size, size * wide);
       dummy.updateMatrix();
       bodies.setMatrixAt(i, dummy.matrix);
 
-      // 衣は沈んだ色。歩調にあわせてわずかに明暗するだけ
-      ember(color, 0.15 + 0.08 * (0.5 + 0.5 * Math.sin(gait)), hue);
+      // 衣は沈んだ色。個体ごとのオフセットに、歩調ぶんの明暗を足す
+      ember(color, 0.15 + oni[o + 8]! + 0.08 * (0.5 + 0.5 * Math.sin(gait)), hue);
       bodies.setColorAt(i, color);
+      heads.setColorAt(i, color);
+      hats.setColorAt(i, color);
+      horns.setColorAt(i * 2, color);
+      horns.setColorAt(i * 2 + 1, color);
 
-      // 提灯は体の脇に提げ、歩調の半分の周期で前後に振れる
+      // 頭。衣の尖った先に載せる。型によって大きさだけが変わる
+      const headY = y + (1.08 + HEAD_R * headMul) * size;
+      dummy.position.set(x, headY, z);
+      dummy.rotation.set(0, yaw, 0);
+      dummy.scale.setScalar(size * headMul);
+      dummy.updateMatrix();
+      heads.setMatrixAt(i, dummy.matrix);
+
+      // 角。型 1 の頭に 2 本、左右へ開いて生やす。他の型は scale 0 で畳む
+      const hornScale = kind === 1 ? size : 0;
+      const hornY = headY + HEAD_R * headMul * size * 0.6;
+      const hornOff = HEAD_R * headMul * size * HORN_SPREAD;
+      for (let h = 0; h < 2; h++) {
+        const lean = h === 0 ? -1 : 1;
+        dummy.position.set(x + nx * hornOff * lean, hornY, z + nz * hornOff * lean);
+        // 回転順が YXZ なので、z 成分が体の向きに対する左右の開きになる
+        dummy.rotation.set(-0.16, yaw, 0.34 * lean);
+        dummy.scale.setScalar(hornScale);
+        dummy.updateMatrix();
+        horns.setMatrixAt(i * 2 + h, dummy.matrix);
+      }
+
+      // 笠。型 0 の頭に載せる。型 1・2 は scale 0 で畳む
+      dummy.position.set(x, headY + HEAD_R * headMul * size * 0.35, z);
+      dummy.rotation.set(-0.07, yaw, Math.sin(gait) * 0.06);
+      dummy.scale.setScalar(kind === 0 ? size : 0);
+      dummy.updateMatrix();
+      hats.setMatrixAt(i, dummy.matrix);
+
+      // 提灯は棹の先。歩調の半分の周期で前後に振れる
       const swing = Math.sin(gait * 0.5 + 0.8) * 0.24;
-      dummy.position.set(
-        x + nx * 0.44 * size + tx * swing,
-        y + LANTERN_Y * size + Math.sin(gait * 0.5 + 1.1) * 0.06,
-        z + nz * 0.44 * size + tz * swing,
-      );
+      const lx = x + nx * REACH * size * hand + tx * swing;
+      const ly = y + LANTERN_Y * size + Math.sin(gait * 0.5 + 1.1) * 0.06;
+      const lz = z + nz * REACH * size * hand + tz * swing;
+
+      // 棹は肩から提灯へ。両端が必ず一致するので「提げている」と読める
+      const sy = y + SHOULDER_Y * size;
+      arm.set(lx - x, ly - sy, lz - z);
+      dummy.position.set((x + lx) / 2, (sy + ly) / 2, (z + lz) / 2);
+      dummy.scale.set(1, 1, arm.length() || 1);
+      dummy.lookAt(lx, ly, lz); // 局所 +Z が棹の向きになる
+      dummy.updateMatrix();
+      poles.setMatrixAt(i, dummy.matrix);
+
+      dummy.position.set(lx, ly, lz);
       dummy.rotation.set(0, 0, 0);
-      dummy.scale.setScalar(0.72 + size * 0.4);
+      dummy.scale.setScalar(0.9 + size * 0.4);
       dummy.updateMatrix();
       lanterns.setMatrixAt(i, dummy.matrix);
 
       // 明度を上げすぎるとブルームで白く飛ぶので、琥珀の手前で止める
-      const flick = 0.48 + 0.09 * Math.sin(t * 2.7 + oni[o + 4]! * 3.3);
+      const flick = 0.54 + 0.09 * Math.sin(t * 2.7 + oni[o + 4]! * 3.3);
       ember(color, flick, hue, 0.05);
       lanterns.setColorAt(i, color);
     }
 
     bodies.instanceMatrix.needsUpdate = true;
+    heads.instanceMatrix.needsUpdate = true;
+    horns.instanceMatrix.needsUpdate = true;
+    hats.instanceMatrix.needsUpdate = true;
+    poles.instanceMatrix.needsUpdate = true;
     lanterns.instanceMatrix.needsUpdate = true;
     if (bodies.instanceColor) bodies.instanceColor.needsUpdate = true;
+    if (heads.instanceColor) heads.instanceColor.needsUpdate = true;
+    if (horns.instanceColor) horns.instanceColor.needsUpdate = true;
+    if (hats.instanceColor) hats.instanceColor.needsUpdate = true;
     if (lanterns.instanceColor) lanterns.instanceColor.needsUpdate = true;
 
     for (let k = 0; k < lamps.length; k++) {
@@ -302,11 +454,11 @@ export const nightParade: SceneModule = {
       const tick = ticks[i];
       if (!tick) continue;
       // 位相が整数をまたぐ瞬間が、そのまま鳥居をくぐる瞬間になる
-      for (let k = tick(head + oni[i * 5]! - GATE); k > 0; k--) {
+      for (let k = tick(head + oni[i * STRIDE]! - GATE); k > 0; k--) {
         sfx.pluck(tone(9 + ((i / SOUND_EVERY) % 5)), {
           gain: 0.22,
           decay: 2.8,
-          pan: (oni[i * 5 + 1]! / ROAD_W) * 0.6,
+          pan: (oni[i * STRIDE + 1]! / ROAD_W) * 0.6,
         });
       }
     }
