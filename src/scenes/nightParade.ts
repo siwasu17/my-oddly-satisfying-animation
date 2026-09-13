@@ -224,6 +224,187 @@ function soulAt(s: number, tt: number, out: THREE.Vector3): THREE.Vector3 {
   );
 }
 
+/**
+ * 衣の高さ。頭も角も笠も、この高さを基準に載せる。
+ *
+ * 裾の直径（0.84）に対してここが 1.15 しかないと、頭を足しても縦横比が 1.4 にしかならず、
+ * 人影ではなく団子に見える。かといって幅を詰めると、頭のほうが胴より太くなって
+ * 今度はキノコになる。丈のほうを伸ばして 2.3 前後に持っていく。
+ * 伸ばしたぶんは背丈の倍率（oni の size）を縮めて相殺してあるので、
+ * 世界の中での実際の大きさは変わらない。
+ */
+const ROBE_H = 1.7;
+/** 衣を刻む数。縦（裾から襟まで）と横（周回り）。 */
+const ROBE_RINGS = 14;
+const ROBE_SEGS = 22;
+/** 衣の裾が閉じる位置。ここから下は底として塞がる。 */
+const ROBE_FLOOR = -0.06;
+
+const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
+const smoothstep = (a: number, b: number, x: number): number => {
+  const k = clamp01((x - a) / (b - a));
+  return k * k * (3 - 2 * k);
+};
+
+/**
+ * 着物の太さ。h は 0 が裾、1 が襟。
+ *
+ * **下の GLSL 版と同じ式にしてある。** こちらは外接球を出すためだけに使い、
+ * 実際に描かれる形はシェーダ側が作る。片方だけ触ると当たり判定と見た目がずれる。
+ */
+function robeRadius(h: number): number {
+  const k = clamp01(h);
+  /**
+   * 肩から裾へ向かって広がる A ライン。
+   *
+   * 太さは体高（1.15）との釣り合いで決まる。裾の直径が体高に並ぶと、
+   * 人影ではなく団子に見える。裾の直径は 0.84 で、体高の 7 割ほどに留めてある。
+   */
+  let body = 0.2 + 0.22 * Math.pow(1 - k, 1.6);
+  // 襟元で一気にすぼめる
+  body *= 1 - smoothstep(0.86, 1, k) * 0.93;
+  // 裾の下で閉じて、底を塞ぐ
+  return body * smoothstep(ROBE_FLOOR, 0, h);
+}
+
+/**
+ * 着物の衣。回転体の骨格だけを置き、実際の形は頂点シェーダが作る。
+ *
+ * 頂点は位置ではなく「周方向の角度 aAng」と「裾からの高さ aH」を持つ。
+ * シェーダはその 2 つから毎フレーム形を組み立て直すので、袖の張り出しも
+ * 裾のゆらぎも、CPU 側には一切戻ってこない。
+ */
+function buildRobe(): THREE.BufferGeometry {
+  const vCount = (ROBE_RINGS + 1) * (ROBE_SEGS + 1);
+  const pos = new Float32Array(vCount * 3);
+  const nor = new Float32Array(vCount * 3);
+  const ang = new Float32Array(vCount);
+  const hgt = new Float32Array(vCount);
+  const idx = new Uint16Array(ROBE_RINGS * ROBE_SEGS * 6);
+
+  for (let i = 0; i <= ROBE_RINGS; i++) {
+    const h = ROBE_FLOOR + (1 - ROBE_FLOOR) * (i / ROBE_RINGS);
+    const r = robeRadius(h);
+    for (let j = 0; j <= ROBE_SEGS; j++) {
+      const a = (j / ROBE_SEGS) * TAU;
+      const v = i * (ROBE_SEGS + 1) + j;
+      // シェーダが上書きするので、ここは素の回転体のままでよい
+      pos[v * 3] = Math.cos(a) * r;
+      pos[v * 3 + 1] = h * ROBE_H;
+      pos[v * 3 + 2] = Math.sin(a) * r;
+      nor[v * 3] = Math.cos(a);
+      nor[v * 3 + 2] = Math.sin(a);
+      ang[v] = a;
+      hgt[v] = h;
+    }
+  }
+
+  let k = 0;
+  for (let i = 0; i < ROBE_RINGS; i++) {
+    for (let j = 0; j < ROBE_SEGS; j++) {
+      const a0 = i * (ROBE_SEGS + 1) + j;
+      const a1 = a0 + 1;
+      const b0 = a0 + ROBE_SEGS + 1;
+      const b1 = b0 + 1;
+      idx[k++] = a0;
+      idx[k++] = b0;
+      idx[k++] = a1;
+      idx[k++] = a1;
+      idx[k++] = b0;
+      idx[k++] = b1;
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  geo.setAttribute('aAng', new THREE.BufferAttribute(ang, 1));
+  geo.setAttribute('aH', new THREE.BufferAttribute(hgt, 1));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  return geo;
+}
+
+/** 衣のシェーダが読む時刻。update() から毎フレーム入れ直す。 */
+const robeTime = { value: 0 };
+
+/**
+ * 衣の材。`MeshStandardMaterial` に頂点シェーダを差し込む。
+ *
+ * 素の three の照明とブルームをそのまま使いたいので、`ShaderMaterial` で
+ * 書き下ろさずに `onBeforeCompile` で `<begin_vertex>` を置き換えている。
+ *
+ * 位置を動かすと法線が合わなくなるので、形を返す関数 robePoint() を 3 回呼び、
+ * 角度方向と高さ方向へずらした点との外積から法線を作り直している。
+ * こうしないと、袖が張り出したところで陰影が裏返る。
+ */
+function robeMaterial(): THREE.MeshStandardMaterial {
+  const mat = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0.04 });
+
+  /**
+   * これが無いと差し込んだコードが効かないことがある。
+   * three はコンパイル済みプログラムをマテリアルの「パラメータ」で引いたキャッシュから
+   * 引き当てるが、そのキーに onBeforeCompile の中身は入らない。パラメータが同じ
+   * マテリアルが他にあると、そちらのプログラムが使い回されて、衣が素の回転体のまま描かれる。
+   */
+  mat.customProgramCacheKey = () => 'nightParade-robe';
+
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = robeTime;
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        /* glsl */ `
+        #include <common>
+        uniform float uTime;
+        attribute float aAng;
+        attribute float aH;
+        attribute float aPhase;
+        attribute float aGait;
+        vec3 vRobe;
+
+        // 上の robeRadius() と同じ式
+        float robeR(float h) {
+          float k = clamp(h, 0.0, 1.0);
+          float body = 0.2 + 0.22 * pow(1.0 - k, 1.6);
+          body *= 1.0 - smoothstep(0.86, 1.0, k) * 0.93;
+          return body * smoothstep(${ROBE_FLOOR.toFixed(2)}, 0.0, h);
+        }
+
+        vec3 robePoint(float a, float h) {
+          float r = robeR(h);
+
+          // 袖。肩の下へ垂れる帯として、前後ではなく左右へ張り出す。
+          // 上下の縁を急にすると袖口の切れ目が出る。角度方向を尖らせて（6 乗）
+          // 胴が一様に太るのではなく、左右 2 つの塊として出るようにする
+          float sleeve = smoothstep(0.5, 0.58, h) * (1.0 - smoothstep(0.76, 0.84, h));
+          r *= 1.0 + sleeve * 1.0 * pow(abs(cos(a)), 5.0);
+
+          // 裾のゆらぎ。下ほど大きく、歩調にあわせて周回りを波が巡る
+          float low = (1.0 - clamp(h, 0.0, 1.0));
+          low *= low;
+          r *= 1.0 + low * 0.22 * sin(a * 3.0 + uTime * aGait * 0.5 + aPhase);
+
+          float y = h * ${ROBE_H.toFixed(2)}
+            + low * 0.08 * sin(a * 2.0 - uTime * aGait * 0.4 + aPhase);
+          return vec3(cos(a) * r, y, sin(a) * r);
+        }
+      `,
+      )
+      .replace(
+        '#include <beginnormal_vertex>',
+        /* glsl */ `
+        vRobe = robePoint(aAng, aH);
+        vec3 rbA = robePoint(aAng + 0.03, aH);
+        vec3 rbH = robePoint(aAng, aH + 0.03);
+        vec3 objectNormal = normalize(cross(rbH - vRobe, rbA - vRobe));
+      `,
+      )
+      .replace('#include <begin_vertex>', 'vec3 transformed = vRobe;');
+  };
+
+  return mat;
+}
+
 /** 道を帯として起こす。ほぼ水平なので、法線は上向きで足りる。 */
 function buildRoad(): THREE.Mesh {
   const pos = new Float32Array(SEG * 2 * 3);
@@ -290,11 +471,11 @@ function buildGate(): THREE.Group {
    * 行列が鳥居の中ほどをくぐっているように見えてしまう。
    *
    * 高さは、いちばん背の高い妖怪が貫に当たらないところから決める。
-   * 背丈の上限は 1.52 で、角のある型はそこから頭と角が伸び、歩調の弾みも足すと
-   * 道面から約 3.3 に届く。貫をその上（3.5）へ置くと、桁まで 4.35 要る。
-   * これ以上高くすると、並みの背丈の妖怪に対して門が過大に見える。
+   * 倍率の上限は 1.04 で、角のある型はそこから衣・頭・角が積み上がり、
+   * 歩調の弾みも足すと道面から約 2.8 に届く。貫をその上（2.95）へ置くと、
+   * 桁まで 3.8 要る。これ以上高くすると、並みの背丈の妖怪に対して門が過大に見える。
    */
-  const top = 4.35;
+  const top = 3.8;
   /**
    * 柱の間隔（半分）。道幅（1.7）に近づけないと、柱の足元に道が無くなって
    * 宙に立って見える。とはいえ狭くしすぎると、道幅いっぱいに広がった妖怪が
@@ -350,14 +531,17 @@ export const nightParade: SceneModule = {
       const o = i * STRIDE;
       // 等間隔を基本にしつつ前後へ散らすと、詰まりと隙間ができて行列らしくなる
       oni[o] = (i + rnd() * 0.6 - 0.3) / COUNT;
-      // 道幅いっぱいまで散らすと、鳥居の柱に触れる個体が出る
-      oni[o + 1] = (rnd() * 2 - 1) * (ROAD_W - 0.75);
-      const size = 0.72 + rnd() * 0.8;
+      // 道幅いっぱいまで散らすと、鳥居の柱に触れる個体が出る。
+      // 袖のぶん体が横に広がったので、以前より狭く取る
+      oni[o + 1] = (rnd() * 2 - 1) * (ROAD_W - 0.8);
+      // 衣が丈長になったぶん、倍率を縮めて世界の中での背丈を保つ
+      const size = 0.52 + rnd() * 0.52;
       oni[o + 2] = size;
       oni[o + 3] = 5.0 + rnd() * 2.8;
       oni[o + 4] = rnd() * TAU;
-      // 背丈と横幅を逆に振る。背の高いものは痩せ、低いものは横に広がる
-      oni[o + 5] = 1.5 - 0.72 * ((size - 0.72) / 0.8) + (rnd() * 0.24 - 0.12);
+      // 背丈と横幅を逆に振る。背の高いものは痩せ、低いものは横に広がる。
+      // 広げすぎると、背の低い個体の幅が体高に並んで団子に見える
+      oni[o + 5] = 1.22 - 0.34 * ((size - 0.52) / 0.52) + (rnd() * 0.16 - 0.08);
       // 体を揺らす向き。左右に割れると、列全体が一方向へ揃って揺れない
       oni[o + 6] = rnd() < 0.5 ? -1 : 1;
       const k = rnd();
@@ -386,11 +570,21 @@ export const nightParade: SceneModule = {
       flatShading: true,
     });
 
-    // 五角錐にしておくと、衣の折り目のような陰影が出る
-    const body = new THREE.ConeGeometry(0.42, 1.15, 5);
-    body.translate(0, 0.575, 0);
-    bodies = new THREE.InstancedMesh(body, cloth, COUNT);
+    // 衣。形は頂点シェーダが作るので、ここでは骨格と個体ごとの位相だけ渡す
+    const robe = buildRobe();
+    const phase = new Float32Array(COUNT);
+    const gait = new Float32Array(COUNT);
+    for (let i = 0; i < COUNT; i++) {
+      phase[i] = oni[i * STRIDE + 4]!;
+      gait[i] = oni[i * STRIDE + 3]!;
+    }
+    robe.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phase, 1));
+    robe.setAttribute('aGait', new THREE.InstancedBufferAttribute(gait, 1));
+
+    bodies = new THREE.InstancedMesh(robe, robeMaterial(), COUNT);
     bodies.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    // 袖と裾はシェーダで広がるので、CPU 側の外接球では足りない
+    bodies.frustumCulled = false;
     root.add(bodies);
 
     // 頭。衣と同じ材で、大きさだけを型で変える
@@ -465,6 +659,8 @@ export const nightParade: SceneModule = {
 
   update(t) {
     const hue = drift(t);
+    // 衣の形はシェーダが t から作り直す。CPU 側は時刻を渡すだけ
+    robeTime.value = t;
     // 行列の先頭が道のどこにいるか。各自の位置に足すだけで、全員が同じ速さで進む
     const head = t / LAP;
 
@@ -515,7 +711,8 @@ export const nightParade: SceneModule = {
       horns.setColorAt(i * 2 + 1, color);
 
       // 頭。衣の尖った先に載せる。型によって大きさだけが変わる
-      const headY = y + (1.08 + HEAD_R * headMul) * size;
+      // 衣の丈の 94% あたりが襟。ROBE_H を変えたら頭もついてくるよう比で書く
+      const headY = y + (ROBE_H * 0.94 + HEAD_R * headMul) * size;
       dummy.position.set(x, headY, z);
       dummy.rotation.set(0, yaw, 0);
       dummy.scale.setScalar(size * headMul);
