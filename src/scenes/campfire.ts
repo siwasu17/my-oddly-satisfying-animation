@@ -9,8 +9,8 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
  * 円錐に組んだ薪の隙間で炎が舐めるように揺れ、そこから火の粉が
  * 渦を巻いて立ち上り、上空で暗くなって消える。
  * 炎は板に焼いたフラクタルノイズで、下から上へ流れながら舌が千切れていく。
- * 火の粉と煙は GPU 側（頂点シェーダ）で軌跡を組み立てるので、
- * 1000 粒を超えても CPU では 1 本のドローコールしか積まない。
+ * 火の粉は GPU 側（頂点シェーダ）で軌跡を組み立てるので、2000 粒を超えても
+ * CPU では 1 本のドローコールしか積まない。
  * 色はすべて palette の ember を 24 段の LUT に焼いてシェーダへ渡しているので、
  * 暖色帯から外れることが無い。
  * カメラは焚き火の端に座ったくらいの高さから、少し見下ろしている。
@@ -21,23 +21,19 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
 
 /** 火の粉の粒数（GPU で動かすので CPU 負荷は粒数に依らない） */
 const SPARKS = 2200;
-/** 煙の粒数 */
-const SMOKE = 90;
 /** 薪の本数（円錐に立てかける。手前の 1 本は組まない） */
 const LOGS = 5;
 /** 炎の板の枚数。奥行きはこの重ね方で作る */
-const FLAME_LAYERS = 3;
-/** 薪の根元で明滅する熾火の数 */
-const EMBERS = 26;
+const FLAME_LAYERS = 2;
 
-/** 炎と火の粉の発生源の高さ */
-const FIRE_Y = 0.5;
+/** 炎の板の下端。地面に接地させる（浮かせると炎だけ宙に浮いて見える） */
+const FIRE_Y = 0.0;
 /** 炎の板の高さと幅（層ごとに倍率を掛ける） */
-const FLAME_H = 2.9;
-const FLAME_W = 1.5;
+const FLAME_H = 3.2;
+const FLAME_W = 1.7;
 
 /** 火の粉が湧き出す高さ */
-const SPARK_Y0 = 0.5;
+const SPARK_Y0 = 0.4;
 /** 火の粉の画面上の基準サイズ（px。カメラからの距離で割る） */
 const SPARK_PX = 22;
 /** 火の粉が上りきる高さの範囲 */
@@ -77,8 +73,6 @@ const uLut = { value: new Float32Array(LUT_N * 3) };
 const uPixelRatio = { value: 1 };
 
 const lutColor = new THREE.Color();
-const dummy = new THREE.Object3D();
-const color = new THREE.Color();
 
 /** palette の ember を 24 段のグラデーションに焼く。drift のゆらぎもここで乗る。 */
 const refreshLut = (t: number): void => {
@@ -138,7 +132,7 @@ const GLSL_NOISE = /* glsl */ `
   }
 `;
 
-// ---- 粒（火の粉・煙）-----------------------------------------------------
+// ---- 火の粉（GPU パーティクル）-------------------------------------------
 
 /** 粒の軌跡はすべて頂点シェーダで組み立てる。CPU は毎フレーム t を渡すだけ。 */
 const PARTICLE_VERT = /* glsl */ `
@@ -201,7 +195,7 @@ const PARTICLE_FRAG = /* glsl */ `
   }
 `;
 
-/** 粒の系統ごとの設定。火の粉と煙で同じシェーダを使い分ける。 */
+/** 粒の系統ごとの設定。1 つのシェーダを設定違いで使い回せるようにしてある。 */
 interface ParticleCfg {
   count: number;
   lifeMin: number;
@@ -317,16 +311,17 @@ const FLAME_FRAG = /* glsl */ `
     float edgeR = 0.44 * taper * (0.55 + 0.9 * fbm(vec3(uSeed + 11.0, h * 3.4 - uTime * 1.1, 2.0)));
     float xs = x - sway;
     float d = xs < 0.0 ? -xs / max(edgeL, 1e-3) : xs / max(edgeR, 1e-3);
-    float body = 1.0 - smoothstep(0.25, 1.0, d);
+    // 下端は板の縁が水平に出るので、わずかにぼかして熾きの光へ溶かす
+    float body = (1.0 - smoothstep(0.25, 1.0, d)) * smoothstep(-0.03, 0.12, h);
 
     // 上へ流れるノイズで舌を刻む。高いところほど千切れやすくする
-    float n = fbm(vec3(x * 4.6 + uSeed, h * 3.0 - uTime * uSpeed, uSeed * 3.7));
-    float flame = body * smoothstep(0.3, 0.66, n + 0.32 - h * 0.62);
+    float n = fbm(vec3(x * 6.5 + uSeed, h * 4.2 - uTime * uSpeed * 1.4, uSeed * 3.7));
+    float flame = body * smoothstep(0.4, 0.74, n + 0.3 - h * 0.5);
     if (flame <= 0.004) discard;
 
     // 根元ほど熱い。bloom（明度 0.28 で滲む）で白く飛ばないよう上限を抑える
     float heat = clamp(flame * (1.0 - h * 0.5), 0.0, 1.0);
-    gl_FragColor = vec4(lut(0.3 + heat * 0.52), flame * uOpacity);
+    gl_FragColor = vec4(lut(0.3 + heat * 0.46), flame * uOpacity);
   }
 `;
 
@@ -334,7 +329,7 @@ const FLAME_FRAG = /* glsl */ `
 const burnLog = (mat: THREE.MeshStandardMaterial): void => {
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uFlick = uFlick;
-    shader.uniforms.uBurn = { value: emberColor(0.44) };
+    shader.uniforms.uBurn = { value: emberColor(0.72) };
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vLocal;')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvLocal = position;');
@@ -352,19 +347,14 @@ const burnLog = (mat: THREE.MeshStandardMaterial): void => {
         `#include <dithering_fragment>
          float burn = smoothstep(${BURN_H.toFixed(2)}, 0.0, vLocal.y);
          float mottle = 0.45 + 0.55 * bhash(floor(vLocal * 7.0));
-         gl_FragColor.rgb += uBurn * burn * burn * mottle * (0.38 + 0.3 * uFlick);`,
+         gl_FragColor.rgb += uBurn * burn * burn * mottle * (0.2 + 0.16 * uFlick);`,
       );
   };
 };
 
 // ---------------------------------------------------------------------------
 
-/** 熾火ごとの [x, z, 大きさ, 明滅の位相] */
-const embers = new Float32Array(EMBERS * 4);
-
-let emberMesh: THREE.InstancedMesh;
 let fireLight: THREE.PointLight;
-let glowMat: THREE.MeshBasicMaterial;
 
 /** 爆ぜる音の刻み。build のたびに作り直す。 */
 let tick = ticker();
@@ -398,10 +388,27 @@ export const campfire: SceneModule = {
     root.add(floor);
 
     // ---- 地面に落ちる照り返し。炎のゆらぎに合わせて濃さが呼吸する ----
-    glowMat = new THREE.MeshBasicMaterial({
-      color: emberColor(0.5),
+    // 単色の円を置くと外周にふちが出て「円盤」に見えるので、中心から減衰させる
+    const glowMat = new THREE.ShaderMaterial({
+      vertexShader: /* glsl */ `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        ${GLSL_LUT}
+        uniform float uFlick;
+        varying vec2 vUv;
+        void main() {
+          float d = length(vUv - 0.5) * 2.0;
+          float a = pow(max(0.0, 1.0 - d), 2.8);
+          gl_FragColor = vec4(lut(0.5), a * (0.16 + 0.1 * uFlick));
+        }
+      `,
+      uniforms: { uLut, uFlick },
       transparent: true,
-      opacity: 0.3,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
@@ -441,22 +448,8 @@ export const campfire: SceneModule = {
       root.add(log);
     }
 
-    // ---- 熾火。薪の足元で不規則に明滅する平たい粒 ----
-    for (let i = 0; i < EMBERS; i++) {
-      const a = rnd() * Math.PI * 2;
-      const r = 0.25 + rnd() * 1.35;
-      embers[i * 4] = Math.cos(a) * r;
-      embers[i * 4 + 1] = Math.sin(a) * r;
-      embers[i * 4 + 2] = 0.08 + rnd() * 0.11;
-      embers[i * 4 + 3] = rnd() * Math.PI * 2;
-    }
-    emberMesh = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(1, 7, 5),
-      new THREE.MeshBasicMaterial(),
-      EMBERS,
-    );
-    emberMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    root.add(emberMesh);
+    // 薪の足元に熾火の粒も置いていたが、球を火の色まで明るくすると bloom で
+    // 白い小石のように浮いてしまうので落とした。火床は炎の根元と照り返しが担う。
 
     // ---- 炎。幅と速さをずらした板を重ねて奥行きを出す ----
     const flameGeo = new THREE.PlaneGeometry(1, 1);
@@ -475,7 +468,7 @@ export const campfire: SceneModule = {
           uH: { value: FLAME_H * (0.8 + k * 0.35) },
           uSeed: { value: 3.1 + i * 7.7 },
           uSpeed: { value: 1.15 + k * 0.5 },
-          uOpacity: { value: 0.5 - k * 0.11 },
+          uOpacity: { value: 0.58 - k * 0.12 },
         },
         transparent: true,
         depthWrite: false,
@@ -491,7 +484,7 @@ export const campfire: SceneModule = {
         count: SPARKS,
         lifeMin: LIFE_MIN,
         lifeMax: LIFE_MAX,
-        r0: 0.8,
+        r0: 1.0,
         riseMin: RISE_MIN,
         riseMax: RISE_MAX,
         wobble: 0.32,
@@ -511,30 +504,8 @@ export const campfire: SceneModule = {
       }),
     );
 
-    // ---- 煙。火の粉が消えた先に残る、ごく薄い暖色の靄 ----
-    root.add(
-      makeParticles({
-        count: SMOKE,
-        lifeMin: 7.5,
-        lifeMax: 13,
-        r0: 0.5,
-        riseMin: 5.5,
-        riseMax: 8.5,
-        wobble: 1.1,
-        sizeMin: 2.6,
-        sizeMax: 6,
-        sizePx: SPARK_PX * 2.4,
-        opacity: 0.07,
-        lutLo: 0.02,
-        lutHi: 0.3,
-        y0: 1.1,
-        spread: 2.4,
-        twist: 1.6,
-        fadePow: 0.9,
-        riseCurve: 0.72,
-        soft: 0.9,
-      }),
-    );
+    // 煙も同じ仕組みで出していたが、大きな粒が bloom で丸いボケ玉になり、
+    // 火の粉の柱の上に泡が浮いて見えたので落とした（粒を小さくすると今度は見えない）。
 
     // ---- 火そのものが光源なので、ここだけは PointLight を足す ----
     fireLight = new THREE.PointLight(emberColor(0.9), 4.2, 9, 2);
@@ -550,28 +521,10 @@ export const campfire: SceneModule = {
     uFlick.value = fl;
     refreshLut(t);
 
-    const hue = drift(t);
-
-    // ---- 熾火 ----
-    for (let i = 0; i < EMBERS; i++) {
-      const o = i * 4;
-      const b = 0.5 + 0.5 * Math.sin(t * 2.3 + embers[o + 3]) * Math.sin(t * 0.9 + embers[o]);
-      dummy.position.set(embers[o], 0.06, embers[o + 1]);
-      dummy.scale.set(embers[o + 2], embers[o + 2] * 0.45, embers[o + 2]);
-      dummy.updateMatrix();
-      emberMesh.setMatrixAt(i, dummy.matrix);
-
-      ember(color, 0.42 + 0.34 * b, hue, 0.04 * b);
-      emberMesh.setColorAt(i, color);
-    }
-    emberMesh.instanceMatrix.needsUpdate = true;
-    if (emberMesh.instanceColor) emberMesh.instanceColor.needsUpdate = true;
-
     // ---- 光源と地面の照り返し。炎の揺らぎに合わせて強さが呼吸する ----
-    fireLight.intensity = 2.4 + fl * 1.4;
+    fireLight.intensity = 1.9 + fl * 1.1;
     fireLight.position.x = Math.sin(t * 1.7) * 0.12;
     fireLight.position.z = Math.cos(t * 2.1) * 0.12;
-    glowMat.opacity = 0.11 + fl * 0.07;
   },
 
   sound(t, _dt, sfx) {
