@@ -84,13 +84,24 @@
   }
   #desc { margin: 0; font-size: 13px; color: var(--dim); line-height: 1.6; }
 
-  /* 12 個あるので折り返さず 1 行に並べ、はみ出した分は横スクロールで見せる */
+  /*
+   * 12 個あるので折り返さず 1 行に並べ、はみ出した分は横スクロールで見せる。
+   * 「まだ先がある」ことを端のフェードで示すが、その幅は ui.ts が
+   * スクロール位置から決めている（端に着いたら 0 になり、最後のタブが
+   * 霞まずに全部見える）。
+   */
   #tabs {
     pointer-events: auto;
     display: flex; gap: 8px; flex-wrap: nowrap;
     overflow-x: auto; scrollbar-width: none; padding-bottom: 4px;
-    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent);
-    mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent);
+    --fade-l: 0px;
+    --fade-r: 0px;
+    -webkit-mask-image: linear-gradient(to right,
+                        transparent 0, #000 var(--fade-l),
+                        #000 calc(100% - var(--fade-r)), transparent 100%);
+    mask-image: linear-gradient(to right,
+                transparent 0, #000 var(--fade-l),
+                #000 calc(100% - var(--fade-r)), transparent 100%);
   }
   #tabs::-webkit-scrollbar { display: none; }
   .tab {

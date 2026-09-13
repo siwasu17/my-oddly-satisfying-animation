@@ -32,6 +32,9 @@ const SWIPE_RATIO = 1.6;
 /** ゆっくりした指の動きは回転なので、この時間を過ぎたら送らない（ms） */
 const SWIPE_MAX_MS = 600;
 
+/** タブ列の端をぼかす幅（px）。まだ先があることを示すためだけのもの。 */
+const TAB_FADE_PX = 48;
+
 function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
   if (!node) throw new Error(`#${id} が index.html に見つかりません`);
@@ -150,6 +153,21 @@ export function createUi(scenes: readonly SceneModule[], handlers: UiHandlers): 
 
   watchSwipe(app);
 
+  /**
+   * タブ列の端のフェード幅を、残りのスクロール量から決める。
+   * 固定幅でぼかすと端まで送っても最後のタブが霞んだままになるので、
+   * 端に近づくほど細くし、着いたら 0 にして全部見せる。
+   */
+  function fadeTabEdges(): void {
+    const rest = Math.max(tabs.scrollWidth - tabs.clientWidth - tabs.scrollLeft, 0);
+    tabs.style.setProperty('--fade-l', `${Math.min(tabs.scrollLeft, TAB_FADE_PX)}px`);
+    tabs.style.setProperty('--fade-r', `${Math.min(rest, TAB_FADE_PX)}px`);
+  }
+
+  tabs.addEventListener('scroll', fadeTabEdges, { passive: true });
+  window.addEventListener('resize', fadeTabEdges);
+  fadeTabEdges();
+
   return {
     show(index, scene) {
       currentIndex = index;
@@ -158,6 +176,7 @@ export function createUi(scenes: readonly SceneModule[], handlers: UiHandlers): 
       buttons.forEach((b, i) => b.classList.toggle('on', i === index));
       // 狭い画面ではタブが横スクロールするので、選択中のものを見える位置へ
       buttons[index]?.scrollIntoView({ block: 'nearest', inline: 'center' });
+      fadeTabEdges(); // スクロールが起きなかったときのために自分でも呼ぶ
     },
     setDesc(text) {
       desc.textContent = text;
