@@ -282,11 +282,30 @@ function buildRoad(): THREE.Mesh {
 function buildGate(): THREE.Group {
   roadAt(GATE, here);
   roadAt(GATE + DU, ahead);
-  const top = here.y + 3.0;
-  const half = ROAD_W + 0.5;
+  /**
+   * 道の面からの高さ。
+   *
+   * 柱を地面（y=0）から立ててはいけない。鳥居を置いているのは丘の上で、
+   * 道はそこで 3 ほど持ち上がっている。地面から立てると柱の下半分が道より下に伸び、
+   * 行列が鳥居の中ほどをくぐっているように見えてしまう。
+   *
+   * 高さは、いちばん背の高い妖怪が貫に当たらないところから決める。
+   * 背丈の上限は 1.52 で、角のある型はそこから頭と角が伸び、歩調の弾みも足すと
+   * 道面から約 3.3 に届く。貫をその上（3.5）へ置くと、桁まで 4.35 要る。
+   * これ以上高くすると、並みの背丈の妖怪に対して門が過大に見える。
+   */
+  const top = 4.35;
+  /**
+   * 柱の間隔（半分）。道幅（1.7）に近づけないと、柱の足元に道が無くなって
+   * 宙に立って見える。とはいえ狭くしすぎると、道幅いっぱいに広がった妖怪が
+   * 柱をすり抜ける。妖怪の横方向の広がりは最大でも 1.8 なので、その外側へ置く。
+   */
+  const half = ROAD_W + 0.3;
+  /** 柱を道の面より少しだけ下へ伸ばして、足元が浮いて見えないようにする。 */
+  const foot = 0.4;
 
   const gate = new THREE.Group();
-  gate.position.set(here.x, 0, here.z);
+  gate.position.set(here.x, here.y - 0.06, here.z);
   // Y 回転をこう取ると、局所 +Z が進行方向、局所 +X が道幅方向になる
   gate.rotation.y = Math.atan2(ahead.x - here.x, ahead.z - here.z);
 
@@ -297,15 +316,15 @@ function buildGate(): THREE.Group {
   });
 
   for (const side of [-1, 1]) {
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, top, 0.3), mat);
-    post.position.set(half * side, top / 2, 0);
+    const post = new THREE.Mesh(new THREE.BoxGeometry(0.3, top + foot, 0.3), mat);
+    post.position.set(half * side, top / 2 - foot / 2, 0);
     gate.add(post);
   }
   const kasagi = new THREE.Mesh(new THREE.BoxGeometry(half * 2 + 1.1, 0.24, 0.36), mat);
   kasagi.position.y = top;
   gate.add(kasagi);
   const nuki = new THREE.Mesh(new THREE.BoxGeometry(half * 2 + 0.3, 0.16, 0.24), mat);
-  nuki.position.y = top - 0.72;
+  nuki.position.y = top - 0.85;
   gate.add(nuki);
 
   return gate;
@@ -331,7 +350,8 @@ export const nightParade: SceneModule = {
       const o = i * STRIDE;
       // 等間隔を基本にしつつ前後へ散らすと、詰まりと隙間ができて行列らしくなる
       oni[o] = (i + rnd() * 0.6 - 0.3) / COUNT;
-      oni[o + 1] = (rnd() * 2 - 1) * (ROAD_W - 0.5);
+      // 道幅いっぱいまで散らすと、鳥居の柱に触れる個体が出る
+      oni[o + 1] = (rnd() * 2 - 1) * (ROAD_W - 0.75);
       const size = 0.72 + rnd() * 0.8;
       oni[o + 2] = size;
       oni[o + 3] = 5.0 + rnd() * 2.8;
@@ -379,8 +399,9 @@ export const nightParade: SceneModule = {
     root.add(heads);
 
     // 角。型 1 の頭に 2 本。他の型は scale 0 にして畳んでおく
-    const horn = new THREE.ConeGeometry(0.09, 0.78, 4);
-    horn.translate(0, 0.39, 0);
+    // 長くしすぎると、背丈の上限と重なったときに鳥居の貫を突き抜ける
+    const horn = new THREE.ConeGeometry(0.09, 0.55, 4);
+    horn.translate(0, 0.275, 0);
     horns = new THREE.InstancedMesh(horn, cloth, COUNT * 2);
     horns.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     root.add(horns);
