@@ -6,31 +6,36 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
 /**
  * 百鬼夜行。
  *
- * 何が動くか: 闇に浮かぶ環状の夜道を、提灯を提げた妖怪の行列がひたすら練り歩く。
+ * 何が動くか: 闇に浮かぶ環状の夜道を、妖怪の行列がひたすら練り歩く。
  * 道は円ではなく、半径と高さに整数倍の波を重ねた閉曲線なので、行列は膨らんだり
  * 窄まったり、丘を越えて上下しながら、必ず元の場所へ帰ってくる。
- * 気持ちよさの芯: 灯りのひと連なりが、膨らみ窄まりながら丘を越えて帰ってくるところ。
- * 主役は行列全体の帯であって、一体一体ではない。
- * ループの周期: およそ 54 秒で一周。
+ * 行列に人魂が寄り添っていて、道の上をふわふわと行き来しながら尾を引いている。
+ * 気持ちよさの芯: 行列そのものは律儀に同じ速さで進んでいるのに、人魂だけが
+ * その上を勝手気ままに漂っているところ。堅い反復とやわらかい揺らぎが同居する。
+ * ループの周期: 行列は およそ 54 秒で一周。人魂の揺れはそれと整数比になっていないので、
+ * 同じ絵は戻ってこない（灯りの居場所だけは毎フレーム t から作り直している）。
  * カメラ: 環の全周を必ず画面へ収める。
  *
  * 「環の全周を見せる」と「一体のかたちを読ませる」は画角の上で両立しない。
  * この fov（48°）と環の半径（15±4.4）では、全周を入れると一体は 20〜40px にしかならず、
- * 笠も角も棹も輪郭としては潰れる。ここでは全周のほうを取った。
+ * 笠も角も輪郭としては潰れる。ここでは全周のほうを取った。
  * だから造形の作り分けは「一目で分かる違い」を狙っていない。近づいて見た人にだけ
  * 見える差として置いてあり、遠目には帯の質感のゆらぎとしてだけ効けばよい。
  * 一体を読ませたくなったら、それは画角を変える判断になる（このシーンの芯が変わる）。
  * 音: 手前の鳥居をくぐるたびに遠くで鈴が鳴り、底に地鳴りを敷く。
  * スコープ外: 顔の造作、手足の関節、名前の付く個別の妖怪。そして「一体が何者か
- * 分かること」自体。体は衣・頭・角・笠・棹の 5 パーツの組み合わせだけで作り、
+ * 分かること」自体。体は衣・頭・角・笠の 4 パーツの組み合わせだけで作り、
  * 3 つの型と体型・明度の振れで、帯が均質に見えないところまでを担う。
+ * 人魂も物理で飛ばさない（軌道は時刻の関数で、粒どうしも干渉しない）。
  * 群れの相互作用も扱わない
  * （並びは道のパラメータの関数なので、追い越しも詰まりも生まれない）。
  *
  * 一体が持っているのは「道のどこにいるか」だけで、位置も向きも毎フレーム
  * その 1 つの式から作り直す。前後の間隔をわずかにばらしてあるので、
- * 列は詰まったり途切れたりしながらも、灯りのひと連なりとしては崩れない。
- * 行列と一緒に 3 つの灯りが動いていて、通り過ぎたところだけ道が明るむ。
+ * 列は詰まったり途切れたりしながらも、ひと連なりとしては崩れない。
+ * 人魂の尾も同じ考え方で、「その人魂が少し前にいた場所」を時刻を遡って
+ * 引き直しているだけ。前フレームの位置を溜め込んでいないので、
+ * タブを離れて戻っても尾が絡まらない。
  */
 
 /**
@@ -42,23 +47,50 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
 const COUNT = 60;
 /** 行列が道を一周するのにかかる秒数。 */
 const LAP = 54;
-/** 道の基準半径。 */
-const R = 15;
+/**
+ * 道の基準半径。
+ * 15 だと環の左右が画面の端に触れて輪が閉じて見えなかった。カメラを引くと
+ * 一体がさらに小さくなるので、環のほうを縮めて余白を作っている。
+ */
+const R = 12;
 /** 道幅の半分。 */
 const ROAD_W = 1.7;
 /** 道を刻む分割数。 */
 const SEG = 240;
-/** 提灯を提げる高さ（体の大きさに比例する）。 */
-const LANTERN_Y = 1.05;
-/** 棹の付け根（肩）の高さ。同じく体の大きさに比例する。 */
-const SHOULDER_Y = 0.74;
 /**
- * 棹が体から横へ張り出す量。提灯はこの先にぶら下がる。
- * 体の半径（0.42）より大きく取らないと、提灯が衣のシルエットに埋まって
- * 「提げている」に見えない。
+ * 人魂の数。
+ * 増やすほど「どれが主役か」が割れて、ただの光点の散布になる。
+ * 明るさを個体ごとに落としてあるので、強く光るのは実際にはこの半分ほど。
  */
-const REACH = 0.58;
-/** 行列と一緒に動く灯りの数。 */
+const SOULS = 10;
+/**
+ * 1 つの人魂が引く尾の粒の数。
+ * 粒 j は「その人魂が j·TAIL_DT 秒前にいた場所」に置く。位置は時刻の関数なので、
+ * 遡るだけで尾が引ける。前フレームの位置を溜め込まずに済む。
+ */
+const TAIL = 16;
+/**
+ * 尾の粒 1 つぶんの遡り幅（秒）。
+ * 粒の間隔は SOUL_SPEED × これ。粒の「見えている芯」より広げると尾が破線になるので、
+ * 数を増やしてでも間隔のほうを詰める。
+ */
+const TAIL_DT = 0.04;
+/**
+ * 頭の玉の大きさと、尾の粒の大きさ。
+ * PointsMaterial は粒ごとに大きさを変えられないので、頭と尾を別の Points に分けている。
+ * 1 つにまとめると全部が同じ太さの線になり、光の玉ではなく画面の傷に見えてしまう。
+ */
+const CORE_SIZE = 1.5;
+const TAIL_SIZE = 1.15;
+/** 人魂 1 つが持つ値の数。[道の位置, 周回の半径, 周回の角速度, 位相, 浮く高さ, 明るさ] */
+const SOUL_STRIDE = 6;
+/**
+ * 人魂が漂う速さ（単位/秒）。半径ではなくこちらを固定し、角速度は半径から割り出す。
+ * こうすると、大きく回る人魂も小さく回る人魂も同じ速さで動くので、尾の長さが揃う。
+ * 角速度のほうを固定すると、半径の違いがそのまま尾の長短になってしまう。
+ */
+const SOUL_SPEED = 2.4;
+/** 人魂に付ける実光源の数。全部に付けると重いので、数個だけ。 */
 const LAMPS = 3;
 /**
  * 鳥居を置く位置（道のパラメータ 0..1）。
@@ -70,7 +102,7 @@ const SOUND_EVERY = 4;
 
 /**
  * 妖怪ごとに持つ値の数。
- * [道の位置, 道幅方向のずれ, 背丈, 歩調, 位相, 横幅の倍率, 提げる側, 型, 衣の明度]
+ * [道の位置, 道幅方向のずれ, 背丈, 歩調, 位相, 横幅の倍率, 揺れる向き, 型, 衣の明度]
  */
 const STRIDE = 9;
 
@@ -96,18 +128,46 @@ const dummy = new THREE.Object3D();
 const color = new THREE.Color();
 const here = new THREE.Vector3();
 const ahead = new THREE.Vector3();
-/** 棹の長さを測るための作業用。 */
-const arm = new THREE.Vector3();
+/** 人魂の粒 1 つぶんの居場所を受け取る作業用。 */
+const wisp = new THREE.Vector3();
 
 const oni = new Float32Array(COUNT * STRIDE);
+const soul = new Float32Array(SOULS * SOUL_STRIDE);
 
 let bodies: THREE.InstancedMesh;
 let heads: THREE.InstancedMesh;
 let horns: THREE.InstancedMesh;
 let hats: THREE.InstancedMesh;
-let poles: THREE.InstancedMesh;
-let lanterns: THREE.InstancedMesh;
+let cores: THREE.Points;
+let souls: THREE.Points;
 let lamps: THREE.PointLight[] = [];
+
+/**
+ * 人魂の粒に貼る、中心が白く縁へ向かって消えていく丸。
+ * PointsMaterial は map を与えないと四角い点になるので、丸さはここで作る。
+ * disposeGroup() はテクスチャまでは破棄しないため、build のたびに作らず
+ * モジュールに 1 枚だけ持たせて使い回す。
+ */
+let sprite: THREE.CanvasTexture | null = null;
+
+function wispSprite(): THREE.CanvasTexture {
+  if (sprite) return sprite;
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  // 中心の減衰を急にすると、粒の「見えている芯」が点の大きさより遥かに小さくなり、
+  // 粒を並べても連続した筋にならず破線に見える。手前をなだらかに保つ
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.5, 'rgba(255,255,255,0.55)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, size, size);
+  sprite = new THREE.CanvasTexture(canvas);
+  return sprite;
+}
 
 /** 一体ごとに、鳥居をくぐった回数を数える */
 let ticks = tickers(COUNT);
@@ -121,6 +181,47 @@ function roadAt(u: number, out: THREE.Vector3): THREE.Vector3 {
   const r = R + 3.0 * Math.sin(a * 3) + 1.4 * Math.sin(a * 5 + 0.7);
   const y = 2.1 + 1.15 * Math.sin(a * 2 + 0.4) + 0.62 * Math.sin(a * 5 + 1.9);
   return out.set(Math.cos(a) * r, y, Math.sin(a) * r);
+}
+
+/**
+ * 人魂 s が時刻 tt にいる場所を out に書き込む。
+ *
+ * 行列と同じ速さで道を進みながら、道の上を水平に周回し、ゆっくり浮き沈みする。
+ * tt を遡って呼べば「少し前にいた場所」が返る。尾はこれで引く。
+ *
+ * 尾の長さを揃えるのに、2 つのことが要る。
+ * 1. 揺れを正弦波で作らない。正弦波は折り返しで速度がゼロになるので、そこに
+ *    居合わせた人魂だけ尾が縮んで、玉が 1 つ浮いているようにしか見えなくなる。
+ * 2. 周回の面を水平に取る。「道の法線 × 鉛直」の面で回すと、環の手前と奥では
+ *    その面が視線の方を向き、軌道が真横から見た線に潰れて画面上から尾が消える。
+ *    水平な輪なら、俯瞰しているかぎりどこでも楕円として見える。
+ *
+ * 周回の速さを行列の一周（LAP 秒）と整数比にしていないので、同じ並びには戻らない。
+ */
+function soulAt(s: number, tt: number, out: THREE.Vector3): THREE.Vector3 {
+  const o = s * SOUL_STRIDE;
+  const u = tt / LAP + soul[o]!;
+  roadAt(u, here);
+  roadAt(u + DU, ahead);
+  const dx = ahead.x - here.x;
+  const dz = ahead.z - here.z;
+  const len = Math.hypot(dx, dz) || 1;
+  const tx = dx / len;
+  const tz = dz / len;
+
+  const rad = soul[o + 1]!;
+  const ang = tt * soul[o + 2]! + soul[o + 3]!;
+  // 道幅の外まではみ出す水平な輪。行列の上を横切って戻ってくるように見える
+  const across = Math.cos(ang) * rad;
+  const along = Math.sin(ang) * rad;
+  // 浮き沈みは周回よりずっと遅く。尾の長さには効かせない
+  const lift = soul[o + 4]! + Math.sin(tt * 0.37 + soul[o + 3]!) * 0.7;
+
+  return out.set(
+    here.x + tz * across + tx * along,
+    here.y + lift,
+    here.z - tx * across + tz * along,
+  );
 }
 
 /** 道を帯として起こす。ほぼ水平なので、法線は上向きで足りる。 */
@@ -213,9 +314,9 @@ function buildGate(): THREE.Group {
 /** 提灯を提げた妖怪の行列が、うねる夜道をどこまでも巡っていく。 */
 export const nightParade: SceneModule = {
   name: 'Night Parade',
-  desc: '提灯を提げた妖怪たちが、ひと連なりになって闇の環を練り歩く。',
+  desc: '闇の環を練り歩く妖怪の行列に、人魂が尾を引いて寄り添い漂う。',
   // 俯瞰しすぎると鳥居が潰れるので、環が見える高さぎりぎりまで下げている
-  camera: { pos: [0, 9.5, 31], target: [0, 1.8, 0] },
+  camera: { pos: [0, 15, 30], target: [0, 1.2, 0] },
 
   build(root) {
     ticks = tickers(COUNT);
@@ -237,12 +338,26 @@ export const nightParade: SceneModule = {
       oni[o + 4] = rnd() * TAU;
       // 背丈と横幅を逆に振る。背の高いものは痩せ、低いものは横に広がる
       oni[o + 5] = 1.5 - 0.72 * ((size - 0.72) / 0.8) + (rnd() * 0.24 - 0.12);
-      // 提灯を提げる側。左右に割れると、列が一方向へ揃わない
+      // 体を揺らす向き。左右に割れると、列全体が一方向へ揃って揺れない
       oni[o + 6] = rnd() < 0.5 ? -1 : 1;
       const k = rnd();
       oni[o + 7] = k < 0.3 ? 1 : k < 0.52 ? 2 : 0;
-      // 衣の明度のオフセット。沈んだ衣と少し浮いた衣が混ざる
-      oni[o + 8] = rnd() * 0.15 - 0.05;
+      // 衣の明度のオフセット。狭いと帯が一色に貼り付くので、広めに振る
+      oni[o + 8] = rnd() * 0.24 - 0.05;
+    }
+
+    for (let s = 0; s < SOULS; s++) {
+      const o = s * SOUL_STRIDE;
+      // 行列の全長へばらまく。等間隔から少し外すと、寄り集まる場所ができる
+      soul[o] = (s + rnd() * 0.7 - 0.35) / SOULS;
+      const rad = 1.3 + rnd() * 1.4;
+      soul[o + 1] = rad;
+      // 角速度は半径から割り出す。どの人魂も SOUL_SPEED で動くので尾が揃う
+      soul[o + 2] = SOUL_SPEED / rad;
+      soul[o + 3] = rnd() * TAU;
+      soul[o + 4] = 1.5 + rnd() * 2.1;
+      // 明るさに段を付ける。全部が同じ強さだと、どれが主役か割れてしまう
+      soul[o + 5] = 0.5 + rnd() * 0.5;
     }
 
     const cloth = new THREE.MeshStandardMaterial({
@@ -279,33 +394,36 @@ export const nightParade: SceneModule = {
     hats.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     root.add(hats);
 
-    // 棹。肩から提灯へ渡して、灯りが体につながっていることを見せる。
-    // 細くすると遠景で 1px を割って消えるので、太さは衣に対して十分取り、
-    // 提灯の残り火を移したくらいの自発光を持たせて輪郭を残す
-    poles = new THREE.InstancedMesh(
-      new THREE.BoxGeometry(0.085, 0.085, 1),
-      new THREE.MeshStandardMaterial({
-        color: emberColor(0.22),
-        emissive: emberColor(0.34),
-        emissiveIntensity: 0.55,
-        roughness: 0.7,
-        metalness: 0.2,
-      }),
-      COUNT,
-    );
-    poles.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    root.add(poles);
+    // 人魂。粒は光そのものなので加算合成で重ね、深度も書かない。
+    // 尾が重なったところが自然に明るくなり、ブルームがそこを芯として拾う
+    const wispPoints = (count: number, size: number): THREE.Points => {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+      const points = new THREE.Points(
+        geo,
+        new THREE.PointsMaterial({
+          size,
+          map: wispSprite(),
+          vertexColors: true,
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          sizeAttenuation: true,
+        }),
+      );
+      // 粒は道の外まで漂うので、視錐台の判定を切って端で消えないようにする
+      points.frustumCulled = false;
+      return points;
+    };
 
-    // 提灯は光そのものなので、陰影を付けずブルームに拾わせる
-    lanterns = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(0.16, 10, 8),
-      new THREE.MeshBasicMaterial(),
-      COUNT,
-    );
-    lanterns.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    root.add(lanterns);
+    // 尾を先に足して、頭の玉をその上へ重ねる
+    souls = wispPoints(SOULS * TAIL, TAIL_SIZE);
+    root.add(souls);
+    cores = wispPoints(SOULS, CORE_SIZE);
+    root.add(cores);
 
-    // 行列と一緒に動く灯り。通り過ぎたところだけ道と衣が明るむ
+    // 人魂のいくつかに実光源を持たせる。通り過ぎたところだけ道と衣が明るむ
     lamps = [];
     for (let k = 0; k < LAMPS; k++) {
       const lamp = new THREE.PointLight(0xffa055, 26, 20, 2);
@@ -361,7 +479,7 @@ export const nightParade: SceneModule = {
       dummy.rotation.set(
         -0.07 - Math.sin(gait * 2) * 0.05, // 前かがみに、一歩ごとに頷く
         yaw,
-        Math.sin(gait) * 0.1, // 左右の揺れ
+        Math.sin(gait) * 0.1 * hand, // 左右の揺れ。踏み出す足が個体ごとに逆になる
       );
       dummy.scale.set(size * wide, size, size * wide);
       dummy.updateMatrix();
@@ -404,50 +522,63 @@ export const nightParade: SceneModule = {
       dummy.updateMatrix();
       hats.setMatrixAt(i, dummy.matrix);
 
-      // 提灯は棹の先。歩調の半分の周期で前後に振れる
-      const swing = Math.sin(gait * 0.5 + 0.8) * 0.24;
-      const lx = x + nx * REACH * size * hand + tx * swing;
-      const ly = y + LANTERN_Y * size + Math.sin(gait * 0.5 + 1.1) * 0.06;
-      const lz = z + nz * REACH * size * hand + tz * swing;
-
-      // 棹は肩から提灯へ。両端が必ず一致するので「提げている」と読める
-      const sy = y + SHOULDER_Y * size;
-      arm.set(lx - x, ly - sy, lz - z);
-      dummy.position.set((x + lx) / 2, (sy + ly) / 2, (z + lz) / 2);
-      dummy.scale.set(1, 1, arm.length() || 1);
-      dummy.lookAt(lx, ly, lz); // 局所 +Z が棹の向きになる
-      dummy.updateMatrix();
-      poles.setMatrixAt(i, dummy.matrix);
-
-      dummy.position.set(lx, ly, lz);
-      dummy.rotation.set(0, 0, 0);
-      dummy.scale.setScalar(0.9 + size * 0.4);
-      dummy.updateMatrix();
-      lanterns.setMatrixAt(i, dummy.matrix);
-
-      // 明度を上げすぎるとブルームで白く飛ぶので、琥珀の手前で止める
-      const flick = 0.54 + 0.09 * Math.sin(t * 2.7 + oni[o + 4]! * 3.3);
-      ember(color, flick, hue, 0.05);
-      lanterns.setColorAt(i, color);
     }
+
+    // 人魂。尾の粒 j は「その人魂が j·TAIL_DT 秒前にいた場所」
+    const pos = souls.geometry.attributes.position as THREE.BufferAttribute;
+    const col = souls.geometry.attributes.color as THREE.BufferAttribute;
+    const cpos = cores.geometry.attributes.position as THREE.BufferAttribute;
+    const ccol = cores.geometry.attributes.color as THREE.BufferAttribute;
+
+    for (let s = 0; s < SOULS; s++) {
+      const o = s * SOUL_STRIDE;
+      // 息をするように強弱がつく。人魂ごとに位相をずらす
+      const breath = (0.86 + 0.14 * Math.sin(t * 1.9 + soul[o + 3]! * 1.7)) * soul[o + 5]!;
+
+      // 頭の玉。玉のまわりには尾の先頭数粒が必ず重なり、加算されて明るくなる。
+      // 玉ひとつぶんで閾値を越えるところまで上げると、合計で赤が振り切れて
+      // 芯が白へ張り付き、暖色帯から外れる。重なるぶんの余白を残しておく
+      soulAt(s, t, wisp);
+      cpos.setXYZ(s, wisp.x, wisp.y, wisp.z);
+      ember(color, 0.54, hue);
+      color.multiplyScalar(breath * 0.8);
+      ccol.setXYZ(s, color.r, color.g, color.b);
+
+      // 尾は j=1 から。j=0 を置くと頭の玉と同じ場所で加算されて白く飛ぶ
+      for (let j = 1; j <= TAIL; j++) {
+        soulAt(s, t - j * TAIL_DT, wisp);
+        const g = s * TAIL + j - 1;
+        pos.setXYZ(g, wisp.x, wisp.y, wisp.z);
+
+        // 頭のすぐ後ろを明るく、尾の先へ向かって琥珀へ沈めながら消す。
+        // 粒は隣どうし重なる大きさにしてあるので、1 粒あたりは十分暗くする。
+        // 明るいまま重ねると尾が一様な白い帯になり、光の筋に見えなくなる
+        const fade = 1 - j / (TAIL + 1);
+        ember(color, 0.3 + 0.16 * fade, hue);
+        color.multiplyScalar(fade * fade * breath * 0.26);
+        col.setXYZ(g, color.r, color.g, color.b);
+      }
+    }
+    pos.needsUpdate = true;
+    col.needsUpdate = true;
+    cpos.needsUpdate = true;
+    ccol.needsUpdate = true;
 
     bodies.instanceMatrix.needsUpdate = true;
     heads.instanceMatrix.needsUpdate = true;
     horns.instanceMatrix.needsUpdate = true;
     hats.instanceMatrix.needsUpdate = true;
-    poles.instanceMatrix.needsUpdate = true;
-    lanterns.instanceMatrix.needsUpdate = true;
     if (bodies.instanceColor) bodies.instanceColor.needsUpdate = true;
     if (heads.instanceColor) heads.instanceColor.needsUpdate = true;
     if (horns.instanceColor) horns.instanceColor.needsUpdate = true;
     if (hats.instanceColor) hats.instanceColor.needsUpdate = true;
-    if (lanterns.instanceColor) lanterns.instanceColor.needsUpdate = true;
 
+    // 実光源は人魂そのものに持たせる。灯りと明るむ場所がずれない
     for (let k = 0; k < lamps.length; k++) {
       const lamp = lamps[k];
       if (!lamp) continue;
-      roadAt(head + k / LAMPS, here);
-      lamp.position.set(here.x, here.y + 1.2, here.z);
+      soulAt(Math.floor((k * SOULS) / LAMPS), t, wisp);
+      lamp.position.copy(wisp);
       lamp.intensity = 24 + Math.sin(t * 1.7 + k * 2.1) * 3;
     }
   },
