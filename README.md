@@ -61,7 +61,8 @@ src/
     └── index.ts       シーンの自動収集と並び順
 
 templates/scene.ts     新規シーンの雛形
-scripts/               new-scene.mjs / wt.sh / dev-smoke.sh / play.mjs / merge-scene.mjs / make-icons.mjs
+scripts/               new-scene.mjs / wt.sh / dev-smoke.sh / play.mjs / merge-scene.mjs /
+                       shot.mjs / scene-order.mjs（並び順のもとになる git の追加日）/ make-icons.mjs
 docs/                  作りのノートとブラウザ自動操作のメモ
 ```
 

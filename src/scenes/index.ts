@@ -1,39 +1,5 @@
 import type { SceneModule } from '../types.ts';
-
-/**
- * シーンが追加された順（古い → 新しい）。
- *
- * **タブと数字キーの並びはこれを逆にしたもの**で、新しいシーンほど先頭に出る。
- * 追加日時は git 履歴から取っていて、同じコミットで入ったものは初版の並び
- * （面で見せるものと線で見せるものが交互になる順）を残してある。
- *
- * ここに書かれていないシーンは「いちばん新しいもの」として先頭に付く
- * （複数あればファイル名の降順）。つまり **シーンを 1 本足すときにこのファイルを
- * 編集する必要はない**（並列作業で衝突しないよう、追加のたびに触る共有ファイルを
- * 無くしてある）。落ち着いたところでユーザーがここへ追記すると並びが固定される。
- *
- * 新しいものが先頭に来る以上、#N の番号はシーンを足すたびにずれる。
- * URL の番号は固定されないものとして扱うこと。
- */
-const ORDER: readonly string[] = [
-  'waveLattice',
-  'flipGarden',
-  'breathingRings',
-  'rainRings',
-  'dominoRing',
-  'driftingBubbles',
-  'gimbalRings',
-  'curtainWave',
-  'twistColumn',
-  'marbleMachine',
-  'cascadeTower',
-  'koiPond',
-  'loom',
-  'lavaLamp',
-  'nightParade',
-  'jellyGlobe',
-  'cloudRidge',
-];
+import { ADDED_AT } from 'virtual:scene-added-at';
 
 /**
  * 同じ階層の .ts をすべて読み込む。
@@ -81,15 +47,25 @@ function pickScene(path: string, mod: Record<string, unknown>): SceneModule {
   return found[0]![1] as SceneModule;
 }
 
-/** ORDER を逆に辿る（新しいものほど前）。ORDER に無いものは最新扱いで先頭へ。 */
-function rank(name: string): number {
-  const index = ORDER.indexOf(name);
-  return index === -1 ? -1 : ORDER.length - 1 - index;
+/**
+ * 並び順は **git がそのファイルを追加した時刻**で決まる。新しいシーンほど先頭。
+ *
+ * 並びを固定するために編集する共有ファイルは無い（かつては ORDER という手書きの表があった）。
+ * シーンを 1 本足すとき、このファイルを編集する必要は無い。
+ *
+ * まだコミットしていないシーンは `ADDED_AT` に無く、最新扱いで先頭に出る。
+ * 同時刻に追加されたもの（初期の一括コミット）は名前の昇順で固定する。
+ *
+ * 新しいものが先頭に来る以上、#N の番号はシーンを足すたびにずれる。
+ * URL の番号は固定されないものとして扱うこと。
+ */
+function addedAt(name: string): number {
+  return ADDED_AT[name] ?? Number.POSITIVE_INFINITY;
 }
 
 const files = Object.entries(modules)
   .map(([path, mod]) => ({ name: baseName(path), path, mod }))
   .filter((file) => file.name !== 'index')
-  .sort((a, b) => rank(a.name) - rank(b.name) || b.name.localeCompare(a.name));
+  .sort((a, b) => addedAt(b.name) - addedAt(a.name) || a.name.localeCompare(b.name));
 
 export const SCENES: readonly SceneModule[] = files.map((file) => pickScene(file.path, file.mod));

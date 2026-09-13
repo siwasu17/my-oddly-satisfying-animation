@@ -21,6 +21,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # シーンの並び順を git の追加日から決めているので、履歴を全部持ってくる
+          # （既定の shallow clone だと全シーンが同じ日付になり、並びが壊れる）
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:

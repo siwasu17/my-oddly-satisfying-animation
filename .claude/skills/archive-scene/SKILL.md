@@ -1,6 +1,6 @@
 ---
 name: archive-scene
-description: 出来がいまいちなシーンをタブから外して src/scenes/_archive/ へ退避する。対象の確定 → 退避 → ORDER の掃除 → 型/ビルド/見た目の検証 → コミットまでを通しで行う。消さないので後から戻せる。「アーカイブして」「このシーンは外して」「いまいちだから消して」「タブから外して」や /archive-scene と言われたときに使う。戻す手順（Phase 7）も持つ。
+description: 出来がいまいちなシーンをタブから外して src/scenes/_archive/ へ退避する。対象の確定 → 退避 → 型/ビルド/見た目の検証 → コミットまでを通しで行う。消さないので後から戻せる。「アーカイブして」「このシーンは外して」「いまいちだから消して」「タブから外して」や /archive-scene と言われたときに使う。戻す手順（Phase 6）も持つ。
 argument-hint: "[scene-name]"
 user-invocable: true
 ---
@@ -16,9 +16,9 @@ user-invocable: true
 スキルが担保するのは**手順の正しさ**だけ。
 
 やることは 1 行で言うと `src/scenes/<name>.ts` を `src/scenes/_archive/<name>.ts` へ動かすこと。
-**消さない。** ファイルは残るので、いつでも Phase 7 で戻せる。
+**消さない。** ファイルは残るので、いつでも Phase 6 で戻せる。
 
-「戻して」「復活させて」と言われたときは **Phase 7 だけを単独で実行してよい**。
+「戻して」「復活させて」と言われたときは **Phase 6 だけを単独で実行してよい**。
 
 ---
 
@@ -57,8 +57,8 @@ git rev-parse --abbrev-ref HEAD
 - **`HEAD` が `main` でない** → どこで作業するつもりか確認してから進む。
 
 このスキルは `main` の上で直接行う。**worktree は作らない**し、`npm run merge-scene` も使わない
-（あれは `src/scenes/<camelCase>.ts` 1 本だけを足すシーン追加のための道具で、
-`index.ts` を触るこの作業では必ず「共有ファイルも変更しています」の警告に当たる）。
+（あれは `src/scenes/<camelCase>.ts` を 1 本足すシーン追加のための道具で、
+ファイルを動かす方向のこの作業には合わない）。
 
 ---
 
@@ -99,7 +99,7 @@ git mv src/scenes/<camelCase>.ts src/scenes/_archive/<camelCase>.ts
 
 ### 相対 import を 1 階層ぶん深くする
 
-**これを飛ばすと Phase 4 の `typecheck` が必ず落ちる。** 1 階層下がったので `../` では届かない。
+**これを飛ばすと Phase 3 の `typecheck` が必ず落ちる。** 1 階層下がったので `../` では届かない。
 
 | 移動前 | 移動後 |
 | --- | --- |
@@ -132,29 +132,7 @@ grep -n "^import" src/scenes/_archive/<camelCase>.ts
 
 ---
 
-## Phase 3 — `ORDER` から名前を消す
-
-`src/scenes/index.ts` の `ORDER` に対象名があれば、**その 1 行だけ**を削る。無ければ何もしない。
-
-```bash
-grep -n "<camelCase>" src/scenes/index.ts
-sed -i '' "/^  '<camelCase>',$/d" src/scenes/index.ts
-git diff --stat src/scenes/index.ts
-```
-
-`git diff` が **1 行削除だけ**になっていることを確かめる。それ以外が動いていたら巻き戻す。
-
-`index.ts` は本来ユーザー管轄の共有ファイルで、`CLAUDE.md` も他のスキルも
-「シーンを足すときに触るな」と言っている。**このスキルはこの 1 行削除に限って例外**として触ってよい。
-`ORDER` の並びを保ったまま 1 行消すだけなので、他セッションのシーン追加とはぶつからない。
-
-**やらないこと**: `ORDER` の並べ替え、追記、他の名前の掃除。
-（実在しない名前が `ORDER` に残っていても `indexOf` が `-1` を返すだけで無害。
-気づいても直さない。ユーザーの管轄。）
-
----
-
-## Phase 4 — 検証する
+## Phase 3 — 検証する
 
 ```bash
 npm run typecheck
@@ -173,15 +151,15 @@ npm run shot -- <残っているシーンのどれか 1 本>
 
 ---
 
-## Phase 5 — コミットする
+## Phase 4 — コミットする
 
 ```bash
 git status --porcelain
-git add src/scenes/_archive src/scenes/index.ts
+git add src/scenes/_archive src/scenes/<camelCase>.ts
 git status --porcelain
 ```
 
-差分が `src/scenes/_archive/` と `src/scenes/index.ts` だけであることを確かめる。
+差分が `src/scenes/_archive/` への移動だけであることを確かめる。
 それ以外が混じっていたら**止めてユーザーに見せる**。
 
 メッセージは既存の履歴に合わせた日本語 1 行 + 理由の本文（`git log` を見れば形式が分かる）。
@@ -199,7 +177,7 @@ Claude-Session: <このセッションの URL>
 
 ---
 
-## Phase 6 — 報告する
+## Phase 5 — 報告する
 
 - アーカイブしたシーンの名前と、退避先のパス
 - 残っているシーンの本数（`ls src/scenes/*.ts | wc -l` から `index.ts` を引いた数）
@@ -213,9 +191,9 @@ Claude-Session: <このセッションの URL>
 
 ---
 
-## Phase 7 — アーカイブから戻す
+## Phase 6 — アーカイブから戻す
 
-「戻して」「復活させて」と言われたときに**単独で実行してよい**フェーズ。Phase 2〜5 の逆。
+「戻して」「復活させて」と言われたときに**単独で実行してよい**フェーズ。Phase 2〜4 の逆。
 
 Phase 0 の確認は同じように行う。
 
@@ -232,8 +210,8 @@ npm run build
 npm run shot -- <camelCase>
 ```
 
-**`ORDER` には追記しない。** 書かれていないシーンは `rank()` が `-1` を返して最新扱いになるので、
-戻したシーンはタブの先頭に現れる。並びを固定したくなったらユーザーが `ORDER` に足す。
+**並び順のために触るファイルは無い。** タブの順は git がそのファイルを追加した時刻で決まり、
+戻すと「戻したコミットの日付」になるので、戻したシーンはタブの先頭に現れる。
 
 コミットは `<Title Case 名> をアーカイブから戻した`。push はしない。
 
@@ -243,7 +221,8 @@ npm run shot -- <camelCase>
 
 `src/stage.ts` / `src/palette.ts` / `src/audio.ts` / `src/ui.ts` / `src/main.ts` / `src/types.ts` /
 `scripts/` / `package.json` / `tsconfig.json` / `vite.config.ts` / `index.html` / `README.md` /
-`CLAUDE.md` / `docs/` は**一切変更しない**。`src/scenes/index.ts` も Phase 3 の 1 行削除だけ。
+`CLAUDE.md` / `docs/` / `src/scenes/index.ts` は**一切変更しない**
+（`index.ts` はディレクトリを自動収集し、並び順も git の履歴から決まるので、書き換える理由が無い）。
 
 新しい npm スクリプトも足さない。このスキルは既存の `typecheck` / `build` / `shot` だけで完結する。
 
