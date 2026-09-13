@@ -185,8 +185,8 @@ node scripts/new-scene.mjs <scene-name>
 ```
 
 `src/scenes/<camelCase>.ts` に、動く最小のシーンができる。この時点で `npm run dev` を叩けば
-タブの先頭に出るはず（`src/scenes/index.ts` が自動収集し、新しいシーンほど先頭に並べるので
-登録作業は無い）。
+タブの先頭に出るはず（`src/scenes/index.ts` が自動収集し、git の追加日が新しいシーンほど
+先頭に並べる。まだコミットしていないシーンは最新扱いなので、登録作業も並び順の調整も要らない）。
 
 ---
 

@@ -19,6 +19,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
+import { compareScenes, sceneAddedAt } from './scene-order.mjs';
 
 const ESC = '\u001b[';
 const dim = (s) => `${ESC}2m${s}${ESC}0m`;
@@ -99,22 +100,16 @@ if (!existsSync(join(HERE, 'src', 'scenes', `${SCENE}.ts`))) {
 
 /**
  * src/scenes/index.ts の並び順を再現する。
- * ORDER（追加された順）を逆に辿り、ORDER に無いものは最新扱いで先頭へ
- * （index.ts の rank() と同じ）。
+ * git がそのファイルを追加した時刻の降順（新しいシーンほど前）。
+ * 比較そのものは scene-order.mjs に置いてあり、index.ts が使うものと同じ規則。
  */
 function sceneOrder(dir) {
-  const source = readFileSync(join(dir, 'src', 'scenes', 'index.ts'), 'utf8');
-  const block = source.match(/const ORDER[^=]*=\s*\[([\s\S]*?)\]/);
-  const order = block ? [...block[1].matchAll(/'([^']+)'/g)].map((m) => m[1]) : [];
-  const rank = (name) => {
-    const i = order.indexOf(name);
-    return i === -1 ? -1 : order.length - 1 - i;
-  };
+  const compare = compareScenes(sceneAddedAt(dir));
   return readdirSync(join(dir, 'src', 'scenes'))
     .filter((f) => f.endsWith('.ts'))
     .map((f) => f.slice(0, -3))
     .filter((name) => name !== 'index')
-    .sort((a, b) => rank(a) - rank(b) || b.localeCompare(a));
+    .sort(compare);
 }
 
 // --- 2. dev サーバーを掴む -------------------------------------------------
