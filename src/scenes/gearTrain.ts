@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { SceneModule } from '../types.ts';
 import { tone, tickers } from '../audio.ts';
 import { SURFACE, ember, emberColor, drift } from '../palette.ts';
@@ -6,15 +7,17 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
 /**
  * Gear Train。
  *
- * 何が動くか: 硝子の立方体の中に、14 枚の歯車が三方向の軸で組まれている。背面と
- * 前面には奥行き方向の軸を持つ平歯車、底面には上下方向の軸、左面には左右方向の軸。
- * 背面の大歯車から始まった回転が、立方体を奥から手前へ貫く長い軸で前面へ渡り、
- * かさ歯車で 90 度折れて下へ降り、もう一度折れて左へ抜ける。
- * 気持ちよさの芯: 軸の向きが三度変わっても、歯が 1 枚ぶんもずれずに噛み合ったまま
- * 伝わっていくところ。どこから覗いても辻褄が合っている。
- * ループの周期: 36 秒。この 1 周期で 14 枚すべてが寸分違わず初期姿勢へ戻る。
- * カメラ: 立方体の右上手前から。自動回転で三面が順に見える。
- * 音: 歯数の多い歯車が 1 回転するたびに 1 音。大きいものほど低い。底に機械のうなり。
+ * 何が動くか: 硝子の立方体の中が、46 枚の歯車で埋まっている。六つの面の内側に
+ * 35 枚が貼り付き、面から離れた宙に 7 枚、面と面をつなぐ折れ目に 4 枚のかさ歯車。
+ * 軸の向きは三つある。背面と前面は奥行き方向、底面と上面は上下方向、左面と
+ * 右面は左右方向。立方体を端から端まで貫く長い軸が 3 本あり、奥から手前へ、
+ * 右から左へ、底から上へ回転を運ぶ。背面の大歯車から始まった回転は、
+ * かさ歯車で 90 度折れるたびに軸の向きを変えながら、46 枚すべてに行き渡る。
+ * 気持ちよさの芯: これだけ詰まっているのに、どこを覗いても歯が 1 枚ぶんも
+ * ずれずに噛み合っていること。箱を回すと、さっきまで奥にいた歯車が手前に出てくる。
+ * ループの周期: 36 秒。この 1 周期で 46 枚すべてが寸分違わず初期姿勢へ戻る。
+ * カメラ: 立方体の右上手前から、箱がちょうど画面に収まる距離。自動回転で六面が順に見える。
+ * 音: 大きい歯車が 1 回転するたびに 1 音。低いほど大きい歯車。底に機械のうなり。
  * スコープ外: 物理演算、外部アセット、遊星機構、内歯車、はすば歯車。
  *
  * 噛み合いの式。歯車ごとに右手系の局所枠 (ex, ey, n) を持たせ、回転角 θ を n まわりの
@@ -61,8 +64,10 @@ type Spec =
   | { t: number; k: 'shaft'; from: number; d: number; s?: 1 | -1 }
   | { t: number; k: 'bevel'; from: number; axis: Axis; s: 1 | -1 };
 
-// 位置は連結の指定から導かれる。数値を振ると簡単に食い込むので、
-// 変えたら全ペアの隙間と、軸が他の歯車を貫いていないかを確かめること。
+// 位置は連結の指定から導かれる。1 つ角度を振ると、離れた場所の 2 枚が食い込む。
+// 変えたら全ペアの隙間・箱からのはみ出し・軸が他の歯車を貫いていないかを確かめること。
+// 面に貼り付く歯車は、その面の軸を持つ列から spur で伸ばし、面をまたぐときだけ
+// かさ歯車で折る。宙に浮いている歯車は、長い軸の途中に刺さった段付き歯車。
 const SPEC: Spec[] = [
   { t: 36, k: 'root', axis: AZ, pos: [-1.05, 0.85, -S] }, //  0 背面・大歯車
   { t: 12, k: 'spur', from: 0, a: -0.75 }, //                  1 背面
@@ -78,6 +83,38 @@ const SPEC: Spec[] = [
   { t: 24, k: 'bevel', from: 10, axis: AX, s: -1 }, //        11 かさ歯車 B'（左右の軸へ折れる）
   { t: 24, k: 'shaft', from: 11, d: -3.07 }, //               12 左面（長い軸で右から左へ）
   { t: 16, k: 'spur', from: 12, a: -1.117 }, //               13 左面
+  { t: 18, k: 'spur', from: 0, a: 4.42 }, //                 14 背面
+  { t: 18, k: 'spur', from: 0, a: 0.52 }, //                 15 背面
+  { t: 24, k: 'spur', from: 2, a: 4.78 }, //                 16 背面
+  { t: 24, k: 'spur', from: 3, a: 5.585 }, //                17 前面
+  { t: 18, k: 'spur', from: 4, a: 3.229 }, //                18 前面
+  { t: 18, k: 'spur', from: 5, a: 0.175 }, //                19 前面
+  { t: 18, k: 'spur', from: 8, a: 0.663 }, //                20 底面
+  { t: 18, k: 'spur', from: 8, a: 5.585 }, //                21 底面
+  { t: 24, k: 'spur', from: 13, a: 4.939 }, //               22 左面
+  { t: 18, k: 'spur', from: 12, a: 0.14 }, //                23 左面
+  { t: 18, k: 'shaft', from: 21, d: 5.5 }, //                 24 上面（底から上へ貫く軸）
+  { t: 24, k: 'shaft', from: 13, d: 5.52 }, //               25 右面（左から右へ貫く軸）
+  { t: 18, k: 'spur', from: 25, a: 1.152 }, //               26 右面
+  { t: 18, k: 'spur', from: 25, a: 5.044 }, //               27 右面
+  { t: 16, k: 'spur', from: 25, a: 3.142 }, //               28 右面
+  { t: 18, k: 'spur', from: 24, a: 3.124 }, //               29 上面
+  { t: 24, k: 'shaft', from: 1, d: 1.35 }, //                 30 中間の層
+  { t: 18, k: 'spur', from: 30, a: 0.7 }, //                  31 中間の層
+  { t: 18, k: 'spur', from: 30, a: 3.3 }, //                  32 中間の層
+  { t: 16, k: 'spur', from: 29, a: 1.99 }, //                 33 上面
+  { t: 24, k: 'shaft', from: 21, d: 3.8 }, //                 34 中間の層（上下の軸）
+  { t: 18, k: 'shaft', from: 13, d: 4.6 }, //                 35 中間の層（左右の軸）
+  { t: 16, k: 'spur', from: 34, a: 1.274 }, //                36 中間の層
+  { t: 16, k: 'spur', from: 35, a: 3.403 }, //                37 中間の層
+  { t: 18, k: 'spur', from: 18, a: 4.869 }, //                38 前面
+  { t: 18, k: 'spur', from: 18, a: 1.431 }, //                39 前面
+  { t: 18, k: 'spur', from: 15, a: 0.262 }, //                40 背面
+  { t: 16, k: 'spur', from: 27, a: 3.7 }, //                  41 右面
+  { t: 16, k: 'spur', from: 22, a: 3.787 }, //                42 左面
+  { t: 16, k: 'spur', from: 22, a: 5.515 }, //                43 左面
+  { t: 16, k: 'spur', from: 14, a: 5.655 }, //                44 背面
+  { t: 16, k: 'spur', from: 20, a: 2.199 }, //                45 底面
 ];
 
 interface Gear {
@@ -260,16 +297,31 @@ const mat4 = new THREE.Matrix4();
 const vU = new THREE.Vector3();
 const vT = new THREE.Vector3();
 const vW = new THREE.Vector3();
+const vP = new THREE.Vector3();
+const quat = new THREE.Quaternion();
+const UP = new THREE.Vector3(0, 1, 0);
 
 const spinners: THREE.Group[] = [];
 const bodyMats: THREE.MeshStandardMaterial[] = [];
 const toothMats: THREE.MeshStandardMaterial[] = [];
 let edgeMat: THREE.MeshStandardMaterial;
 
+/**
+ * 音を出す歯車。
+ *
+ * 歯数の多いものほど回転が遅く、拍の間隔があく。40 枚すべてを鳴らすと
+ * 秒に 2 つ近く鳴って騒がしいので、大きいものをさらに 1 つおきに選ぶ。
+ * 残りは黙って回る。
+ */
+const VOICED: number[] = [];
+for (let i = 0, n = 0; i < GEARS.length; i++) {
+  if (GEARS[i]!.teeth >= SOUND_MIN && n++ % 2 === 0) VOICED.push(i);
+}
+
 /** 歯車ごとに「1 回転した回数」を数える */
 let ticks = tickers(GEARS.length);
 
-/** 硝子の箱と、その 12 本の稜。 */
+/** 硝子の箱と、その 12 本の稜。稜は動かないので 1 つに畳む。 */
 function addCube(root: THREE.Group): void {
   const glass = new THREE.MeshPhysicalMaterial({
     color: emberColor(0.5),
@@ -288,22 +340,42 @@ function addCube(root: THREE.Group): void {
     roughness: 0.38,
     metalness: 0.55,
   });
+  const bars: THREE.BufferGeometry[] = [];
   for (let axis = 0; axis < 3; axis++) {
-    const geo = new THREE.BoxGeometry(
-      axis === 0 ? H * 2 + EDGE : EDGE,
-      axis === 1 ? H * 2 + EDGE : EDGE,
-      axis === 2 ? H * 2 + EDGE : EDGE,
-    );
     for (let q = 0; q < 4; q++) {
       const u = (q & 1 ? 1 : -1) * H;
       const v = (q & 2 ? 1 : -1) * H;
-      const m = new THREE.Mesh(geo, edgeMat);
-      if (axis === 0) m.position.set(0, u, v);
-      else if (axis === 1) m.position.set(u, 0, v);
-      else m.position.set(u, v, 0);
-      root.add(m);
+      const bar = new THREE.BoxGeometry(
+        axis === 0 ? H * 2 + EDGE : EDGE,
+        axis === 1 ? H * 2 + EDGE : EDGE,
+        axis === 2 ? H * 2 + EDGE : EDGE,
+      );
+      if (axis === 0) bar.translate(0, u, v);
+      else if (axis === 1) bar.translate(u, 0, v);
+      else bar.translate(u, v, 0);
+      bars.push(bar);
     }
   }
+  root.add(new THREE.Mesh(mergeGeometries(bars)!, edgeMat));
+}
+
+/**
+ * 歯車 1 枚を、地と歯の 2 つの材質を持つ 1 メッシュに畳む。
+ *
+ * 素直に組むと 1 枚が円盤・腹・軸受け・腕 5 本で 8 メッシュになる。40 枚を
+ * 超えると、それだけで描画の呼び出しが 300 を上回ってしまう。位置と向きは
+ * ジオメトリに焼き込めるので、まとめてから 1 度で描く。色を変えたいところが
+ * 2 つ（地と軸受け）あるので、groups を持たせて材質を配列で渡す。
+ */
+function addSolid(
+  inner: THREE.Group,
+  body: THREE.BufferGeometry[],
+  hub: THREE.BufferGeometry,
+  bodyMat: THREE.MeshStandardMaterial,
+  toothMat: THREE.MeshStandardMaterial,
+): void {
+  const merged = mergeGeometries([mergeGeometries(body)!, hub], true)!;
+  inner.add(new THREE.Mesh(merged, [bodyMat, toothMat]));
 }
 
 /** 平歯車の中身。円盤・軸受け・腕・歯。 */
@@ -315,39 +387,28 @@ function addSpur(
 ): void {
   const r = radiusOf(g.teeth) - MODULE * 0.9;
   const seg = Math.max(28, g.teeth * 2);
+  const body: THREE.BufferGeometry[] = [];
 
   // 縁。両端の蓋を持たない筒にすると、内側が窪んで輪に見える。
-  const rim = new THREE.Mesh(new THREE.CylinderGeometry(r, r, THICK, seg, 1, true), bodyMat);
-  rim.rotation.x = Math.PI / 2;
-  inner.add(rim);
-
-  const web = new THREE.Mesh(
-    new THREE.CylinderGeometry(r * 0.995, r * 0.995, THICK * 0.34, seg),
-    bodyMat,
+  body.push(new THREE.CylinderGeometry(r, r, THICK, seg, 1, true).rotateX(Math.PI / 2));
+  body.push(
+    new THREE.CylinderGeometry(r * 0.995, r * 0.995, THICK * 0.34, seg).rotateX(Math.PI / 2),
   );
-  web.rotation.x = Math.PI / 2;
-  inner.add(web);
 
   const hubR = Math.max(0.17, r * 0.26);
-  const hub = new THREE.Mesh(
-    new THREE.CylinderGeometry(hubR, hubR, THICK * 1.35, 18),
-    toothMat,
-  );
-  hub.rotation.x = Math.PI / 2;
-  inner.add(hub);
+  const hub = new THREE.CylinderGeometry(hubR, hubR, THICK * 1.35, 18).rotateX(Math.PI / 2);
 
   // 腕。大きい歯車だけに入れる。歯だけだと回転の向きが読み取りにくい。
   if (g.teeth >= SPOKE_MIN) {
     const armLen = r - hubR;
-    const armGeo = new THREE.BoxGeometry(armLen, MODULE * 1.6, THICK * 0.6);
     for (let s = 0; s < SPOKES; s++) {
       const a = (s / SPOKES) * Math.PI * 2;
-      const arm = new THREE.Mesh(armGeo, bodyMat);
-      arm.position.set(Math.cos(a) * (hubR + armLen / 2), Math.sin(a) * (hubR + armLen / 2), 0);
-      arm.rotation.z = a;
-      inner.add(arm);
+      const arm = new THREE.BoxGeometry(armLen, MODULE * 1.6, THICK * 0.6).rotateZ(a);
+      arm.translate(Math.cos(a) * (hubR + armLen / 2), Math.sin(a) * (hubR + armLen / 2), 0);
+      body.push(arm);
     }
   }
+  addSolid(inner, body, hub, bodyMat, toothMat);
 
   const pitch = radiusOf(g.teeth);
   const teeth = new THREE.InstancedMesh(
@@ -394,28 +455,23 @@ function addBevel(
   const rFar = sg * R - d * cg;
   const zNear = g.s * (cg * uNear + d * sg);
   const zFar = g.s * (cg * R + d * sg);
-  const body = new THREE.Mesh(
-    new THREE.CylinderGeometry(
-      rFar,
-      rNear,
-      Math.abs(zFar - zNear),
-      Math.max(28, g.teeth * 2),
-    ),
-    bodyMat,
-  );
+  const len = Math.abs(zFar - zNear);
+  const zMid = (zNear + zFar) / 2;
+
   // 円錐の大端（半径の大きいほう）が s の側へ向くように倒す
-  body.rotation.x = (g.s > 0 ? 1 : -1) * (Math.PI / 2);
-  body.position.z = (zNear + zFar) / 2;
-  inner.add(body);
+  const cone = new THREE.CylinderGeometry(
+    rFar,
+    rNear,
+    len,
+    Math.max(28, g.teeth * 2),
+  ).rotateX((g.s > 0 ? 1 : -1) * (Math.PI / 2));
+  cone.translate(0, 0, zMid);
 
   const hubR = Math.max(0.15, r * 0.2);
-  const hub = new THREE.Mesh(
-    new THREE.CylinderGeometry(hubR, hubR, Math.abs(zFar - zNear) * 1.25, 18),
-    toothMat,
-  );
-  hub.rotation.x = Math.PI / 2;
-  hub.position.z = (zNear + zFar) / 2;
-  inner.add(hub);
+  const hub = new THREE.CylinderGeometry(hubR, hubR, len * 1.25, 18).rotateX(Math.PI / 2);
+  hub.translate(0, 0, zMid);
+
+  addSolid(inner, [cone], hub, bodyMat, toothMat);
 
   const mid = (1 + CONE_MIN) / 2; // 歯を置く母線上の位置（R に対する割合）
   const geo = new THREE.BoxGeometry(
@@ -450,8 +506,8 @@ function addBevel(
 
 export const gearTrain: SceneModule = {
   name: 'Gear Train',
-  desc: '硝子の立方体に組まれた三方向の歯車。かさ歯車で 90 度ずつ折れながら伝わる。',
-  camera: { pos: [4.0, 3.05, 11.4], target: [0, 0, 0] },
+  desc: '硝子の立方体を 46 枚の歯車が埋めている。かさ歯車で 90 度ずつ折れ、六面へ伝わる。',
+  camera: { pos: [4.88, 3.76, 13.99], target: [0, 0, 0] },
 
   build(root) {
     ticks = tickers(GEARS.length);
@@ -468,22 +524,25 @@ export const gearTrain: SceneModule = {
     });
 
     // 軸。壁から壁へ渡したものと、途中で終わるものがある。
-    const collarGeo = new THREE.CylinderGeometry(SHAFT_R * 2.1, SHAFT_R * 2.1, 0.14, 14);
+    // どれも動かないので、歯車と同じように 1 つのメッシュへ畳む。
+    const rods: THREE.BufferGeometry[] = [];
     for (const sh of SHAFTS) {
-      const len = sh.hi - sh.lo;
-      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(SHAFT_R, SHAFT_R, len, 12), steelMat);
-      shaft.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), sh.n);
+      quat.setFromUnitVectors(UP, sh.n);
       const along = sh.base.dot(sh.n);
-      shaft.position.copy(sh.base).addScaledVector(sh.n, (sh.lo + sh.hi) / 2 - along);
-      root.add(shaft);
+      const place = (at: number): THREE.Matrix4 =>
+        mat4
+          .makeRotationFromQuaternion(quat)
+          .setPosition(vP.copy(sh.base).addScaledVector(sh.n, at - along));
 
+      const rod = new THREE.CylinderGeometry(SHAFT_R, SHAFT_R, sh.hi - sh.lo, 12);
+      rods.push(rod.applyMatrix4(place((sh.lo + sh.hi) / 2)));
+      // 軸受けの輪。壁ぎわで軸が終わっているように見せる。
       for (const end of [sh.lo, sh.hi]) {
-        const collar = new THREE.Mesh(collarGeo, steelMat);
-        collar.quaternion.copy(shaft.quaternion);
-        collar.position.copy(sh.base).addScaledVector(sh.n, end - along);
-        root.add(collar);
+        const collar = new THREE.CylinderGeometry(SHAFT_R * 2.1, SHAFT_R * 2.1, 0.14, 14);
+        rods.push(collar.applyMatrix4(place(end)));
       }
     }
+    root.add(new THREE.Mesh(mergeGeometries(rods)!, steelMat));
 
     for (const g of GEARS) {
       // 外側は姿勢だけを持ち、内側が軸まわりに回る。
@@ -532,9 +591,8 @@ export const gearTrain: SceneModule = {
   },
 
   sound(t, _dt, sfx) {
-    for (let i = 0; i < GEARS.length; i++) {
+    for (const i of VOICED) {
       const g = GEARS[i]!;
-      if (g.teeth < SOUND_MIN) continue;
       // 1 回転を 1 拍として数える。向きは符号で入っているので絶対値で見る。
       const turns = (Math.abs(g.spin) * t) / (Math.PI * 2);
       for (let k = ticks[i]!(turns); k > 0; k--) {
