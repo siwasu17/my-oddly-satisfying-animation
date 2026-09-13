@@ -1,27 +1,26 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
 import { tone, ticker } from '../audio.ts';
-import { SURFACE, ember, emberColor, drift } from '../palette.ts';
+import { SURFACE, ember, drift } from '../palette.ts';
 
 /**
- * 水槽の中で、小魚の群れが竜巻のかたちに回遊しつづける。
+ * 暗い水の中で、小魚の群れが竜巻のかたちに回遊しつづける。
  *
  * 何が動くか: 300 匹の小魚が、上ほど広がる漏斗型の渦を描いて泳ぐ。外側をゆっくり上り、
  *   頂点で内側へ倒れ込み、細い中心を速く下って底からまた外へ出る。渦そのものは
  *   23.5 秒かけて締まったり緩んだりを繰り返す。
  * 気持ちよさの芯: 群れ全体が一匹の生き物のように向きを揃えているのに、数匹ずつが
  *   ばらばらの拍で身をひるがえし、そのたび腹が銀色に閃く。
- * カメラ: 水槽を横からやや見下ろす。漏斗が画面の高さいっぱいに立つ距離に置く。
+ * カメラ: 渦を横からやや見下ろす。漏斗が画面の高さいっぱいに立つ距離に置く。
  * 音: 底に低い唸りを敷き、渦が締まりきる瞬間に水の擦れる音、閃きに合わせて疎らな粒。
- * スコープ外: 個体どうしの相互作用（boids）、ガラスの屈折や水面の揺らぎ、泡、餌や捕食者。
+ * スコープ外: 個体どうしの相互作用（boids）、水槽の枠や水面の揺らぎ、泡、餌や捕食者。
  */
 
 const TAU = Math.PI * 2;
 
 // ---- 調整する数値 ----
 const FISH = 300; // 小魚の数。増やすほど 1 匹の向きが潰れて粒の雲になる
-const TANK_W = 18; // 水槽の内寸（横）
-const TANK_H = 14; // 同（高さ）
+const TANK_W = 18; // 底の広さ（横）
 const TANK_D = 13; // 同（奥行き）
 
 const CORE_R = 3.6; // 渦の断面の中心半径
@@ -70,7 +69,7 @@ function place(i: number, t: number, breath: number, out: THREE.Vector3): void {
 
 export const fishTornado: SceneModule = {
   name: 'Fish Tornado',
-  desc: '小魚の群れが水槽の中で漏斗状の渦を巻き、ときおり腹をひるがえして光る。',
+  desc: '小魚の群れが暗い水の中で漏斗状の渦を巻き、ときおり腹をひるがえして光る。',
   camera: { pos: [0, 9.6, 21], target: [0, 6.9, 0] },
 
   build(root) {
@@ -121,18 +120,6 @@ export const fishTornado: SceneModule = {
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.02;
     root.add(floor);
-
-    // 水槽はガラス面を張らず稜線だけ。手前の面で群れを隠さないため
-    const frame = new THREE.LineSegments(
-      new THREE.EdgesGeometry(new THREE.BoxGeometry(TANK_W, TANK_H, TANK_D)),
-      new THREE.LineBasicMaterial({
-        color: emberColor(0.22),
-        transparent: true,
-        opacity: 0.3,
-      }),
-    );
-    frame.position.y = TANK_H / 2;
-    root.add(frame);
 
     tickBreath = ticker();
     tickFlash = ticker();
