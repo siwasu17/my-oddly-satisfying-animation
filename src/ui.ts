@@ -22,6 +22,16 @@ export interface Ui {
   showAutoPlay(on: boolean): void;
 }
 
+// 横スワイプでシーンを送るときのしきい値。
+// これらを超えなかった指の動きは、OrbitControls の視点回転にそのまま残る。
+
+/** 送りと判定する横方向の移動量（px） */
+const SWIPE_MIN_X = 56;
+/** 縦揺れに対して横がこれだけ勝っていること */
+const SWIPE_RATIO = 1.6;
+/** ゆっくりした指の動きは回転なので、この時間を過ぎたら送らない（ms） */
+const SWIPE_MAX_MS = 600;
+
 function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
   if (!node) throw new Error(`#${id} が index.html に見つかりません`);
@@ -29,6 +39,7 @@ function el<T extends HTMLElement>(id: string): T {
 }
 
 export function createUi(scenes: readonly SceneModule[], handlers: UiHandlers): Ui {
+  const app = el('app');
   const title = el('title');
   const desc = el('desc');
   const fade = el('fade');
@@ -87,6 +98,57 @@ export function createUi(scenes: readonly SceneModule[], handlers: UiHandlers): 
   });
 
   let currentIndex = 0;
+
+  /**
+   * スマホでの横スワイプ。指 1 本で素早く払われたときだけ前後のシーンへ送る。
+   * 見ているのは映像の面（#app）だけなので、タブの横スクロールとはぶつからない。
+   * マウスやペンでは動かさない（視点のドラッグ回転と区別がつかないため）。
+   */
+  function watchSwipe(surface: HTMLElement): void {
+    const touching = new Set<number>();
+    let id = -1; // 送りの候補として追っている指。-1 は「追っていない」
+    let x0 = 0;
+    let y0 = 0;
+    let t0 = 0;
+
+    surface.addEventListener('pointerdown', (e) => {
+      if (e.pointerType !== 'touch') return;
+      touching.add(e.pointerId);
+      // 2 本目が触れたらピンチ。このジェスチャは送りに使わない
+      if (touching.size > 1) {
+        id = -1;
+        return;
+      }
+      id = e.pointerId;
+      x0 = e.clientX;
+      y0 = e.clientY;
+      t0 = e.timeStamp;
+    });
+
+    surface.addEventListener('pointermove', (e) => {
+      if (e.pointerId !== id) return;
+      if (e.timeStamp - t0 > SWIPE_MAX_MS) {
+        id = -1; // 払うにしては遅い。指を離すまで視点回転として扱う
+        return;
+      }
+      const dx = e.clientX - x0;
+      const dy = e.clientY - y0;
+      if (Math.abs(dx) < SWIPE_MIN_X) return;
+      if (Math.abs(dx) < Math.abs(dy) * SWIPE_RATIO) return;
+      id = -1; // 1 回のスワイプで送るのは 1 枚だけ
+      // 左へ払ったら次（タブの並びで右隣）のシーンへ
+      handlers.select(currentIndex + (dx < 0 ? 1 : -1));
+    });
+
+    const release = (e: PointerEvent): void => {
+      touching.delete(e.pointerId);
+      if (e.pointerId === id) id = -1;
+    };
+    surface.addEventListener('pointerup', release);
+    surface.addEventListener('pointercancel', release);
+  }
+
+  watchSwipe(app);
 
   return {
     show(index, scene) {
