@@ -16,16 +16,22 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
  * 同じ絵は戻ってこない（灯りの居場所だけは毎フレーム t から作り直している）。
  * カメラ: 環の全周を必ず画面へ収める。
  *
+ * 一体の姿は「薄暗いボロボロのゴミ袋が、ゆらゆらしながら歩いている」。
+ * 顔も手足も頭も無い。袋がひとつ、くしゃくしゃに歪んだまま道を進むだけ。
+ * 袋の形はすべて頂点シェーダが毎フレーム組み立てる（CPU 側には戻ってこない）。
+ * 裾と胴の破れはフラグメントの discard で開けているので、輪郭そのものが
+ * ぎざぎざに欠ける。両面を描いて、破れ目から袋の内側が覗くようにしてある。
+ *
  * 「環の全周を見せる」と「一体のかたちを読ませる」は画角の上で両立しない。
- * この fov（48°）と環の半径（15±4.4）では、全周を入れると一体は 20〜40px にしかならず、
- * 笠も角も輪郭としては潰れる。ここでは全周のほうを取った。
+ * この fov（48°）と環の半径（12±4.4）では、全周を入れると一体は 20〜40px にしかならず、
+ * 破れも皺も輪郭としては潰れる。ここでは全周のほうを取った。
  * だから造形の作り分けは「一目で分かる違い」を狙っていない。近づいて見た人にだけ
  * 見える差として置いてあり、遠目には帯の質感のゆらぎとしてだけ効けばよい。
  * 一体を読ませたくなったら、それは画角を変える判断になる（このシーンの芯が変わる）。
  * 音: 手前の鳥居をくぐるたびに遠くで鈴が鳴り、底に地鳴りを敷く。
- * スコープ外: 顔の造作、手足の関節、名前の付く個別の妖怪。そして「一体が何者か
- * 分かること」自体。体は衣・頭・角・笠の 4 パーツの組み合わせだけで作り、
- * 3 つの型と体型・明度の振れで、帯が均質に見えないところまでを担う。
+ * スコープ外: 顔、手足、名前の付く個別の妖怪。そして「一体が何者か分かること」自体。
+ * 袋は 3 つの型（口を縛った袋・ずんぐりした大袋・ねじれた袋）と、体型・破れ方・
+ * 明度の振れで、帯が均質に見えないところまでを担う。
  * 人魂も物理で飛ばさない（軌道は時刻の関数で、粒どうしも干渉しない）。
  * 群れの相互作用も扱わない
  * （並びは道のパラメータの関数なので、追い越しも詰まりも生まれない）。
@@ -102,23 +108,9 @@ const SOUND_EVERY = 4;
 
 /**
  * 妖怪ごとに持つ値の数。
- * [道の位置, 道幅方向のずれ, 背丈, 歩調, 位相, 横幅の倍率, 揺れる向き, 型, 衣の明度]
+ * [道の位置, 道幅方向のずれ, 背丈, 歩調, 位相, 横幅の倍率, 揺れる向き, 型, 袋の明度]
  */
 const STRIDE = 9;
-
-/**
- * 型ごとの頭の大きさ（頭のジオメトリ半径への倍率）。
- * 0 = 笠をかぶった者、1 = 二本角の者、2 = 頭でっかち。
- *
- * 3 つの型は「頭の上に何が出ているか」で分けてある。遠景で効くのは
- * 面の明暗ではなく輪郭の変化なので、頭の大きさだけを変えても差が読めない。
- * 笠は横へ、角は上へ、大頭は丸く——輪郭の出方を型ごとに別方向へ振っている。
- */
-const HEAD_MUL = [0.95, 1.15, 2.3];
-/** 頭のジオメトリ半径。倍率はここに掛かる。 */
-const HEAD_R = 0.2;
-/** 角が頭の中心から左右へ開く量（頭の半径に対する割合）。 */
-const HORN_SPREAD = 0.8;
 
 const TAU = Math.PI * 2;
 /** 進行方向を数値微分で拾うときの刻み。 */
@@ -135,9 +127,6 @@ const oni = new Float32Array(COUNT * STRIDE);
 const soul = new Float32Array(SOULS * SOUL_STRIDE);
 
 let bodies: THREE.InstancedMesh;
-let heads: THREE.InstancedMesh;
-let horns: THREE.InstancedMesh;
-let hats: THREE.InstancedMesh;
 let cores: THREE.Points;
 let souls: THREE.Points;
 let lamps: THREE.PointLight[] = [];
@@ -225,72 +214,82 @@ function soulAt(s: number, tt: number, out: THREE.Vector3): THREE.Vector3 {
 }
 
 /**
- * 衣の高さ。頭も角も笠も、この高さを基準に載せる。
+ * 袋の丈。
  *
- * 裾の直径（0.84）に対してここが 1.15 しかないと、頭を足しても縦横比が 1.4 にしかならず、
- * 人影ではなく団子に見える。かといって幅を詰めると、頭のほうが胴より太くなって
- * 今度はキノコになる。丈のほうを伸ばして 2.3 前後に持っていく。
- * 伸ばしたぶんは背丈の倍率（oni の size）を縮めて相殺してあるので、
- * 世界の中での実際の大きさは変わらない。
+ * 頭も笠も無くなったぶん、袋ひとつで縦横比を稼がなければならない。
+ * 袋の直径は太いところで 1.2 前後あるので、丈をここまで取ってようやく
+ * 縦横比が 2 に届く。これより縮めると、歩く団子にしか見えない。
  */
-const ROBE_H = 1.7;
-/** 衣を刻む数。縦（裾から襟まで）と横（周回り）。 */
-const ROBE_RINGS = 14;
-const ROBE_SEGS = 22;
-/** 衣の裾が閉じる位置。ここから下は底として塞がる。 */
-const ROBE_FLOOR = -0.06;
-
-const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
-const smoothstep = (a: number, b: number, x: number): number => {
-  const k = clamp01((x - a) / (b - a));
-  return k * k * (3 - 2 * k);
-};
+const BAG_H = 2.3;
+/**
+ * 袋を刻む数。縦（裾から口まで）と横（周回り）。
+ * 皺は周回り 15 波まで入れてあるので、横はその 2 倍以上ないと皺が消える。
+ */
+const BAG_RINGS = 22;
+const BAG_SEGS = 36;
+/** 袋の底が閉じる位置。ここから下は底として塞がる（実際には破れて開くことが多い）。 */
+const BAG_FLOOR = -0.12;
+/** 袋の基準の太さ。裾のあたりの半径。 */
+const BAG_R = 0.46;
 
 /**
- * 着物の太さ。h は 0 が裾、1 が襟。
+ * 袋のねじれ・口のすぼまり・結び目を、型ごとに変えるための値。
+ * [口のすぼまり, 結び目の張り出し, ねじれ]
  *
- * **下の GLSL 版と同じ式にしてある。** こちらは外接球を出すためだけに使い、
- * 実際に描かれる形はシェーダ側が作る。片方だけ触ると当たり判定と見た目がずれる。
+ * 0 = 口を縛った袋、1 = ずんぐりした大袋（口が緩い）、2 = ねじれた細袋。
+ * 遠景で効くのは面の明暗ではなく輪郭なので、3 つとも輪郭の出方が別方向になるよう振ってある。
  */
-function robeRadius(h: number): number {
-  const k = clamp01(h);
-  /**
-   * 肩から裾へ向かって広がる A ライン。
-   *
-   * 太さは体高（1.15）との釣り合いで決まる。裾の直径が体高に並ぶと、
-   * 人影ではなく団子に見える。裾の直径は 0.84 で、体高の 7 割ほどに留めてある。
-   */
-  let body = 0.2 + 0.22 * Math.pow(1 - k, 1.6);
-  // 襟元で一気にすぼめる
-  body *= 1 - smoothstep(0.86, 1, k) * 0.93;
-  // 裾の下で閉じて、底を塞ぐ
-  return body * smoothstep(ROBE_FLOOR, 0, h);
+const BAG_KIND: [number, number, number][] = [
+  [0.80, 0.085, 0.45],
+  [0.42, 0.02, 0.15],
+  [0.88, 0.05, 1.55],
+];
+
+/**
+ * 袋の太さ。h は 0 が裾、1 が口。
+ *
+ * **下の GLSL 版と骨格だけ揃えてある。** こちらは外接球を出すためだけに使い、
+ * 実際に描かれる形（皺・ねじれ・ゆらぎ・破れ）はシェーダ側が作る。
+ */
+function bagRadius(h: number): number {
+  const k = h < 0 ? 0 : h > 1 ? 1 : h;
+  let r = BAG_R * (1 - 0.42 * smoothstep(0.1, 1, k));
+  // 口をすぼめる。型のうちいちばん固く縛るものに合わせておけば外接球は足りる
+  r *= 1 - smoothstep(0.7, 0.93, k) * 0.42;
+  // 底を丸く閉じる
+  return r * smoothstep(BAG_FLOOR, 0.1, h);
+}
+
+function smoothstep(a: number, b: number, x: number): number {
+  const t = (x - a) / (b - a);
+  const k = t < 0 ? 0 : t > 1 ? 1 : t;
+  return k * k * (3 - 2 * k);
 }
 
 /**
- * 着物の衣。回転体の骨格だけを置き、実際の形は頂点シェーダが作る。
+ * ゴミ袋の骨格。回転体の格子だけを置き、実際の形は頂点シェーダが作る。
  *
  * 頂点は位置ではなく「周方向の角度 aAng」と「裾からの高さ aH」を持つ。
- * シェーダはその 2 つから毎フレーム形を組み立て直すので、袖の張り出しも
- * 裾のゆらぎも、CPU 側には一切戻ってこない。
+ * シェーダはその 2 つから毎フレーム形を組み立て直すので、皺もねじれも
+ * 歩くたびのたわみも、CPU 側には一切戻ってこない。
  */
-function buildRobe(): THREE.BufferGeometry {
-  const vCount = (ROBE_RINGS + 1) * (ROBE_SEGS + 1);
+function buildBag(): THREE.BufferGeometry {
+  const vCount = (BAG_RINGS + 1) * (BAG_SEGS + 1);
   const pos = new Float32Array(vCount * 3);
   const nor = new Float32Array(vCount * 3);
   const ang = new Float32Array(vCount);
   const hgt = new Float32Array(vCount);
-  const idx = new Uint16Array(ROBE_RINGS * ROBE_SEGS * 6);
+  const idx = new Uint16Array(BAG_RINGS * BAG_SEGS * 6);
 
-  for (let i = 0; i <= ROBE_RINGS; i++) {
-    const h = ROBE_FLOOR + (1 - ROBE_FLOOR) * (i / ROBE_RINGS);
-    const r = robeRadius(h);
-    for (let j = 0; j <= ROBE_SEGS; j++) {
-      const a = (j / ROBE_SEGS) * TAU;
-      const v = i * (ROBE_SEGS + 1) + j;
+  for (let i = 0; i <= BAG_RINGS; i++) {
+    const h = BAG_FLOOR + (1 - BAG_FLOOR) * (i / BAG_RINGS);
+    const r = bagRadius(h);
+    for (let j = 0; j <= BAG_SEGS; j++) {
+      const a = (j / BAG_SEGS) * TAU;
+      const v = i * (BAG_SEGS + 1) + j;
       // シェーダが上書きするので、ここは素の回転体のままでよい
       pos[v * 3] = Math.cos(a) * r;
-      pos[v * 3 + 1] = h * ROBE_H;
+      pos[v * 3 + 1] = h * BAG_H;
       pos[v * 3 + 2] = Math.sin(a) * r;
       nor[v * 3] = Math.cos(a);
       nor[v * 3 + 2] = Math.sin(a);
@@ -300,11 +299,11 @@ function buildRobe(): THREE.BufferGeometry {
   }
 
   let k = 0;
-  for (let i = 0; i < ROBE_RINGS; i++) {
-    for (let j = 0; j < ROBE_SEGS; j++) {
-      const a0 = i * (ROBE_SEGS + 1) + j;
+  for (let i = 0; i < BAG_RINGS; i++) {
+    for (let j = 0; j < BAG_SEGS; j++) {
+      const a0 = i * (BAG_SEGS + 1) + j;
       const a1 = a0 + 1;
-      const b0 = a0 + ROBE_SEGS + 1;
+      const b0 = a0 + BAG_SEGS + 1;
       const b1 = b0 + 1;
       idx[k++] = a0;
       idx[k++] = b0;
@@ -324,32 +323,43 @@ function buildRobe(): THREE.BufferGeometry {
   return geo;
 }
 
-/** 衣のシェーダが読む時刻。update() から毎フレーム入れ直す。 */
-const robeTime = { value: 0 };
+/** 袋のシェーダが読む時刻。update() から毎フレーム入れ直す。 */
+const bagTime = { value: 0 };
 
 /**
- * 衣の材。`MeshStandardMaterial` に頂点シェーダを差し込む。
+ * 袋の材。`MeshStandardMaterial` に頂点シェーダとフラグメントシェーダを差し込む。
  *
  * 素の three の照明とブルームをそのまま使いたいので、`ShaderMaterial` で
- * 書き下ろさずに `onBeforeCompile` で `<begin_vertex>` を置き換えている。
+ * 書き下ろさずに `onBeforeCompile` で組み込みのチャンクを置き換えている。
  *
- * 位置を動かすと法線が合わなくなるので、形を返す関数 robePoint() を 3 回呼び、
+ * 位置を動かすと法線が合わなくなるので、形を返す関数 bagPoint() を 3 回呼び、
  * 角度方向と高さ方向へずらした点との外積から法線を作り直している。
- * こうしないと、袖が張り出したところで陰影が裏返る。
+ * こうしないと、皺やねじれのところで陰影が裏返る。
+ *
+ * 破れはフラグメントで discard する。頂点を消しても格子の目より細かい穴は開かないし、
+ * 裾のぎざぎざが格子の段に揃ってしまって、破れではなく歯車の縁に見える。
  */
-function robeMaterial(): THREE.MeshStandardMaterial {
-  const mat = new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0.04 });
+function bagMaterial(): THREE.MeshStandardMaterial {
+  const mat = new THREE.MeshStandardMaterial({
+    // つるつるに寄せると、通り過ぎる人魂の灯りが皺の上を滑る。
+    // ゴミ袋らしさはこの「安っぽい照り」でほぼ決まる
+    roughness: 0.58,
+    metalness: 0.06,
+    // 破れ目から袋の内側が見えるので、裏面も描く
+    side: THREE.DoubleSide,
+  });
 
   /**
    * これが無いと差し込んだコードが効かないことがある。
    * three はコンパイル済みプログラムをマテリアルの「パラメータ」で引いたキャッシュから
    * 引き当てるが、そのキーに onBeforeCompile の中身は入らない。パラメータが同じ
-   * マテリアルが他にあると、そちらのプログラムが使い回されて、衣が素の回転体のまま描かれる。
+   * マテリアルが他にあると、そちらのプログラムが使い回されて、袋が素の回転体のまま描かれる。
    */
-  mat.customProgramCacheKey = () => 'nightParade-robe';
+  mat.customProgramCacheKey = () => 'nightParade-bag';
 
   mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uTime = robeTime;
+    shader.uniforms.uTime = bagTime;
+
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -360,46 +370,103 @@ function robeMaterial(): THREE.MeshStandardMaterial {
         attribute float aH;
         attribute float aPhase;
         attribute float aGait;
-        vec3 vRobe;
+        attribute float aNeck;
+        attribute float aKnot;
+        attribute float aTwist;
+        attribute float aSeed;
+        // 破れの判定に使う。x = 周方向の角度, y = 裾からの高さ, z = 個体の種
+        varying vec3 vBag;
+        vec3 bagPos;
 
-        // 上の robeRadius() と同じ式
-        float robeR(float h) {
+        vec3 bagPoint(float a, float h) {
           float k = clamp(h, 0.0, 1.0);
-          float body = 0.2 + 0.22 * pow(1.0 - k, 1.6);
-          body *= 1.0 - smoothstep(0.86, 1.0, k) * 0.93;
-          return body * smoothstep(${ROBE_FLOOR.toFixed(2)}, 0.0, h);
-        }
 
-        vec3 robePoint(float a, float h) {
-          float r = robeR(h);
+          // 胴。中身が下へ溜まった袋なので、裾のほうが太い
+          float r = ${BAG_R.toFixed(2)} * (1.0 - 0.42 * smoothstep(0.1, 1.0, k));
+          // 口をすぼめる。縛りの固さは個体ごと
+          r *= 1.0 - smoothstep(0.70, 0.93, k) * aNeck;
+          // 縛った先の余り。結び目として少しだけ開く
+          r += smoothstep(0.90, 1.0, k) * aKnot;
+          // 底を丸く閉じる
+          r *= smoothstep(${BAG_FLOOR.toFixed(2)}, 0.1, h);
 
-          // 袖。肩の下へ垂れる帯として、前後ではなく左右へ張り出す。
-          // 上下の縁を急にすると袖口の切れ目が出る。角度方向を尖らせて（6 乗）
-          // 胴が一様に太るのではなく、左右 2 つの塊として出るようにする
-          float sleeve = smoothstep(0.5, 0.58, h) * (1.0 - smoothstep(0.76, 0.84, h));
-          r *= 1.0 + sleeve * 1.0 * pow(abs(cos(a)), 5.0);
+          // くしゃくしゃ。大きなたわみ 2 つで輪郭をいびつにし、
+          // 細かい皺で法線だけを荒らす。皺は輪郭には出ないが照りには出る。
+          // 縦に通る折り目（高さに依らない項）を 1 本混ぜると、
+          // ぐしゃぐしゃの粒々ではなく「畳まれて皺になった薄い膜」に見える
+          r *= 1.0
+            + 0.17 * sin(a * 2.0 + k * 3.1 + aSeed)
+            + 0.11 * sin(a * 3.0 - k * 5.0 + aSeed * 2.3)
+            + 0.045 * sin(a * 7.0 + aSeed * 1.9)
+            + 0.030 * sin(a * 15.0 + k * 9.0 + aSeed * 4.1);
 
-          // 裾のゆらぎ。下ほど大きく、歩調にあわせて周回りを波が巡る
-          float low = (1.0 - clamp(h, 0.0, 1.0));
+          // 歩くたびに中身が揺れて、裾のほうが膨れたり凹んだりする
+          float low = 1.0 - k;
           low *= low;
-          r *= 1.0 + low * 0.22 * sin(a * 3.0 + uTime * aGait * 0.5 + aPhase);
+          r *= 1.0 + low * 0.12 * sin(uTime * aGait * 0.5 + a * 2.0 + aSeed);
 
-          float y = h * ${ROBE_H.toFixed(2)}
-            + low * 0.08 * sin(a * 2.0 - uTime * aGait * 0.4 + aPhase);
-          return vec3(cos(a) * r, y, sin(a) * r);
+          // ねじれ。上へ行くほど絞られて回る
+          float a2 = a + aTwist * k * k;
+
+          vec3 p = vec3(cos(a2) * r, h * ${BAG_H.toFixed(2)}, sin(a2) * r);
+
+          // ゆらゆら。裾を軸にして上ほど大きく振れる。
+          // 2 つの周期を直交する向きに当てているので、まっすぐ前後には揺れない
+          float s = k * k;
+          p.x += s * 0.22 * sin(uTime * aGait * 0.33 + aPhase);
+          p.z += s * 0.17 * sin(uTime * aGait * 0.27 + aPhase * 1.7 + 1.1);
+          return p;
         }
       `,
       )
       .replace(
         '#include <beginnormal_vertex>',
         /* glsl */ `
-        vRobe = robePoint(aAng, aH);
-        vec3 rbA = robePoint(aAng + 0.03, aH);
-        vec3 rbH = robePoint(aAng, aH + 0.03);
-        vec3 objectNormal = normalize(cross(rbH - vRobe, rbA - vRobe));
+        bagPos = bagPoint(aAng, aH);
+        vec3 bgA = bagPoint(aAng + 0.03, aH);
+        vec3 bgH = bagPoint(aAng, aH + 0.03);
+        vec3 objectNormal = normalize(cross(bgH - bagPos, bgA - bagPos));
+        vBag = vec3(aAng, aH, aSeed);
       `,
       )
-      .replace('#include <begin_vertex>', 'vec3 transformed = vRobe;');
+      .replace('#include <begin_vertex>', 'vec3 transformed = bagPos;');
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        /* glsl */ `
+        #include <common>
+        varying vec3 vBag;
+      `,
+      )
+      .replace(
+        '#include <clipping_planes_fragment>',
+        /* glsl */ `
+        #include <clipping_planes_fragment>
+        {
+          float a = vBag.x;
+          float h = vBag.y;
+          float sd = vBag.z;
+
+          // 裾の破れ。周方向にうねる高さでばっさり切り落とすので、
+          // 輪郭の下端が個体ごとに違うぎざぎざになる
+          float n = 0.50 * sin(a * 4.0 + sd * 3.1)
+                  + 0.32 * sin(a * 7.0 - sd * 1.7)
+                  + 0.18 * sin(a * 13.0 + sd * 5.3);
+          float hem = 0.05 + 0.09 * (0.5 + 0.5 * n);
+          // 裂け。尖らせた波（7 乗）を足して、数か所だけ深くえぐる。
+          // ぎざぎざを一様に大きくすると波形の縁にしか見えないが、
+          // 深い裂け目が数本あると「破れて垂れ下がった袋」に読める
+          hem += pow(0.5 + 0.5 * sin(a * 3.0 + sd * 2.0), 7.0) * 0.34;
+          if (h < hem) discard;
+
+          // 胴の穴。角度と高さの積を閾値で切ると、まばらな染みのように開く
+          float hole = sin(a * 2.0 + sd * 4.7) * sin(h * 5.5 - sd * 2.9)
+                     + 0.35 * sin(a * 5.0 - h * 9.0 + sd);
+          if (hole > 1.04) discard;
+        }
+      `,
+      );
   };
 
   return mat;
@@ -471,15 +538,15 @@ function buildGate(): THREE.Group {
    * 行列が鳥居の中ほどをくぐっているように見えてしまう。
    *
    * 高さは、いちばん背の高い妖怪が貫に当たらないところから決める。
-   * 倍率の上限は 1.04 で、角のある型はそこから衣・頭・角が積み上がり、
-   * 歩調の弾みも足すと道面から約 2.8 に届く。貫をその上（2.95）へ置くと、
+   * 袋の丈は 2.3、背丈の倍率の上限は 1.10 なので、道面から約 2.5。
+   * 歩調の弾みと上端のゆらぎを足しても 2.8 には届かない。貫をその上（2.95）へ置くと、
    * 桁まで 3.8 要る。これ以上高くすると、並みの背丈の妖怪に対して門が過大に見える。
    */
   const top = 3.8;
   /**
    * 柱の間隔（半分）。道幅（1.7）に近づけないと、柱の足元に道が無くなって
    * 宙に立って見える。とはいえ狭くしすぎると、道幅いっぱいに広がった妖怪が
-   * 柱をすり抜ける。妖怪の横方向の広がりは最大でも 1.8 なので、その外側へ置く。
+   * 柱をすり抜ける。妖怪の横方向の広がりは最大でも 1.6 なので、その外側へ置く。
    */
   const half = ROAD_W + 0.3;
   /** 柱を道の面より少しだけ下へ伸ばして、足元が浮いて見えないようにする。 */
@@ -511,10 +578,10 @@ function buildGate(): THREE.Group {
   return gate;
 }
 
-/** 提灯を提げた妖怪の行列が、うねる夜道をどこまでも巡っていく。 */
+/** 破れたゴミ袋のような妖怪の行列が、うねる夜道をどこまでも巡っていく。 */
 export const nightParade: SceneModule = {
   name: 'Night Parade',
-  desc: '闇の環を練り歩く妖怪の行列に、人魂が尾を引いて寄り添い漂う。',
+  desc: '闇の環を練り歩くボロ袋の行列に、人魂が尾を引いて寄り添い漂う。',
   // 俯瞰しすぎると鳥居が潰れるので、環が見える高さぎりぎりまで下げている
   camera: { pos: [0, 15, 30], target: [0, 1.2, 0] },
 
@@ -527,27 +594,46 @@ export const nightParade: SceneModule = {
     let s = 0.4137;
     const rnd = (): number => (s = (s * 9301 + 0.49297) % 1);
 
+    // 袋の形を決める値は、個体ごとに 1 度だけ決めてシェーダへ渡す。
+    // 毎フレーム CPU から送り直す必要がないので、インスタンス属性として持たせる
+    const phase = new Float32Array(COUNT);
+    const gait = new Float32Array(COUNT);
+    const neck = new Float32Array(COUNT);
+    const knot = new Float32Array(COUNT);
+    const twist = new Float32Array(COUNT);
+    const seed = new Float32Array(COUNT);
+
     for (let i = 0; i < COUNT; i++) {
       const o = i * STRIDE;
       // 等間隔を基本にしつつ前後へ散らすと、詰まりと隙間ができて行列らしくなる
       oni[o] = (i + rnd() * 0.6 - 0.3) / COUNT;
-      // 道幅いっぱいまで散らすと、鳥居の柱に触れる個体が出る。
-      // 袖のぶん体が横に広がったので、以前より狭く取る
+      // 道幅いっぱいまで散らすと、鳥居の柱に触れる個体が出る
       oni[o + 1] = (rnd() * 2 - 1) * (ROAD_W - 0.8);
-      // 衣が丈長になったぶん、倍率を縮めて世界の中での背丈を保つ
-      const size = 0.52 + rnd() * 0.52;
-      oni[o + 2] = size;
+      const size = 0.55 + rnd() * 0.55;
       oni[o + 3] = 5.0 + rnd() * 2.8;
       oni[o + 4] = rnd() * TAU;
       // 背丈と横幅を逆に振る。背の高いものは痩せ、低いものは横に広がる。
-      // 広げすぎると、背の低い個体の幅が体高に並んで団子に見える
-      oni[o + 5] = 1.22 - 0.34 * ((size - 0.52) / 0.52) + (rnd() * 0.16 - 0.08);
+      // 広げすぎると、背の低い個体の幅が丈に並んで歩く団子に見える
+      const wide = 1.1 - 0.26 * ((size - 0.55) / 0.55) + (rnd() * 0.14 - 0.07);
       // 体を揺らす向き。左右に割れると、列全体が一方向へ揃って揺れない
       oni[o + 6] = rnd() < 0.5 ? -1 : 1;
       const k = rnd();
-      oni[o + 7] = k < 0.3 ? 1 : k < 0.52 ? 2 : 0;
-      // 衣の明度のオフセット。狭いと帯が一色に貼り付くので、広めに振る
-      oni[o + 8] = rnd() * 0.24 - 0.05;
+      const kind = k < 0.3 ? 1 : k < 0.52 ? 2 : 0;
+      oni[o + 7] = kind;
+      // 型 1（ずんぐり）だけは丈と幅も振り直す。輪郭の差は形の式より先に効く
+      oni[o + 2] = kind === 1 ? size * 0.88 : size;
+      oni[o + 5] = kind === 1 ? wide * 1.14 : wide;
+      // 袋の明度のオフセット。狭いと帯が一色に貼り付くので、広めに振る
+      oni[o + 8] = rnd() * 0.22 - 0.05;
+
+      const preset = BAG_KIND[kind]!;
+      phase[i] = oni[o + 4]!;
+      gait[i] = oni[o + 3]!;
+      neck[i] = preset[0] + (rnd() * 0.16 - 0.08);
+      knot[i] = preset[1] + rnd() * 0.03;
+      twist[i] = preset[2] * (0.7 + rnd() * 0.6) * (rnd() < 0.5 ? -1 : 1);
+      // 皺と破れの種。ここが個体ごとに違うから、同じ袋が二つと無い
+      seed[i] = rnd() * TAU;
     }
 
     for (let s = 0; s < SOULS; s++) {
@@ -564,50 +650,20 @@ export const nightParade: SceneModule = {
       soul[o + 5] = 0.5 + rnd() * 0.5;
     }
 
-    const cloth = new THREE.MeshStandardMaterial({
-      roughness: 0.86,
-      metalness: 0.1,
-      flatShading: true,
-    });
+    // 袋。形は頂点シェーダが作るので、ここでは骨格と個体ごとの値だけ渡す
+    const bag = buildBag();
+    bag.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phase, 1));
+    bag.setAttribute('aGait', new THREE.InstancedBufferAttribute(gait, 1));
+    bag.setAttribute('aNeck', new THREE.InstancedBufferAttribute(neck, 1));
+    bag.setAttribute('aKnot', new THREE.InstancedBufferAttribute(knot, 1));
+    bag.setAttribute('aTwist', new THREE.InstancedBufferAttribute(twist, 1));
+    bag.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seed, 1));
 
-    // 衣。形は頂点シェーダが作るので、ここでは骨格と個体ごとの位相だけ渡す
-    const robe = buildRobe();
-    const phase = new Float32Array(COUNT);
-    const gait = new Float32Array(COUNT);
-    for (let i = 0; i < COUNT; i++) {
-      phase[i] = oni[i * STRIDE + 4]!;
-      gait[i] = oni[i * STRIDE + 3]!;
-    }
-    robe.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phase, 1));
-    robe.setAttribute('aGait', new THREE.InstancedBufferAttribute(gait, 1));
-
-    bodies = new THREE.InstancedMesh(robe, robeMaterial(), COUNT);
+    bodies = new THREE.InstancedMesh(bag, bagMaterial(), COUNT);
     bodies.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    // 袖と裾はシェーダで広がるので、CPU 側の外接球では足りない
+    // 皺とゆらぎでシェーダが外へ膨らむので、CPU 側の外接球では足りない
     bodies.frustumCulled = false;
     root.add(bodies);
-
-    // 頭。衣と同じ材で、大きさだけを型で変える
-    heads = new THREE.InstancedMesh(new THREE.SphereGeometry(HEAD_R, 8, 6), cloth, COUNT);
-    heads.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    root.add(heads);
-
-    // 角。型 1 の頭に 2 本。他の型は scale 0 にして畳んでおく
-    // 長くしすぎると、背丈の上限と重なったときに鳥居の貫を突き抜ける
-    const horn = new THREE.ConeGeometry(0.09, 0.55, 4);
-    horn.translate(0, 0.275, 0);
-    horns = new THREE.InstancedMesh(horn, cloth, COUNT * 2);
-    horns.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    root.add(horns);
-
-    // 笠。型 0 の頭に載せる。輪郭が横へ広がるので、遠目でも角と取り違えない。
-    // ただし体高が 1.3〜1.75 しかないので、笠の直径がそれに並ぶと胴と一体化して
-    // 「キノコ」に読めてしまう。半径は体の半径をわずかに超える程度に留める
-    const hat = new THREE.ConeGeometry(0.34, 0.24, 8);
-    hat.translate(0, 0.12, 0);
-    hats = new THREE.InstancedMesh(hat, cloth, COUNT);
-    hats.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    root.add(hats);
 
     // 人魂。粒は光そのものなので加算合成で重ね、深度も書かない。
     // 尾が重なったところが自然に明るくなり、ブルームがそこを芯として拾う
@@ -638,7 +694,7 @@ export const nightParade: SceneModule = {
     cores = wispPoints(SOULS, CORE_SIZE);
     root.add(cores);
 
-    // 人魂のいくつかに実光源を持たせる。通り過ぎたところだけ道と衣が明るむ
+    // 人魂のいくつかに実光源を持たせる。通り過ぎたところだけ道と袋が明るむ
     lamps = [];
     for (let k = 0; k < LAMPS; k++) {
       const lamp = new THREE.PointLight(0xffa055, 26, 20, 2);
@@ -659,8 +715,8 @@ export const nightParade: SceneModule = {
 
   update(t) {
     const hue = drift(t);
-    // 衣の形はシェーダが t から作り直す。CPU 側は時刻を渡すだけ
-    robeTime.value = t;
+    // 袋の形はシェーダが t から作り直す。CPU 側は時刻を渡すだけ
+    bagTime.value = t;
     // 行列の先頭が道のどこにいるか。各自の位置に足すだけで、全員が同じ速さで進む
     const head = t / LAP;
 
@@ -669,8 +725,6 @@ export const nightParade: SceneModule = {
       const size = oni[o + 2]!;
       const wide = oni[o + 5]!;
       const hand = oni[o + 6]!;
-      const kind = oni[o + 7]!;
-      const headMul = HEAD_MUL[kind]!;
       const gait = t * oni[o + 3]! + oni[o + 4]!;
 
       const u = head + oni[o]!;
@@ -687,59 +741,28 @@ export const nightParade: SceneModule = {
       const side = oni[o + 1]!;
       const bob = Math.abs(Math.sin(gait)) * 0.17 * size;
       const x = here.x + nx * side;
-      const y = here.y + bob;
+      // 裾は破れて途中から無くなっているので、そのぶん袋を道へ埋める。
+      // 埋めないと、ぎざぎざの下端と道のあいだに隙間が空いて宙に浮く
+      const y = here.y + bob - 0.14 * size;
       const z = here.z + nz * side;
       const yaw = Math.atan2(tx, tz);
 
-      // 衣。背丈と横幅を別々に掛けるので、痩せた背高と低い横広が混ざる
+      // 袋。丈と太さを別々に掛けるので、痩せた背高と低い横広が混ざる
       dummy.position.set(x, y, z);
       dummy.rotation.set(
-        -0.07 - Math.sin(gait * 2) * 0.05, // 前かがみに、一歩ごとに頷く
+        -0.05 - Math.sin(gait * 2) * 0.045, // 前のめりに、一歩ごとに頷く
         yaw,
-        Math.sin(gait) * 0.1 * hand, // 左右の揺れ。踏み出す足が個体ごとに逆になる
+        Math.sin(gait) * 0.12 * hand, // 左右の揺れ。踏み出す足が個体ごとに逆になる
       );
       dummy.scale.set(size * wide, size, size * wide);
       dummy.updateMatrix();
       bodies.setMatrixAt(i, dummy.matrix);
 
-      // 衣は沈んだ色。個体ごとのオフセットに、歩調ぶんの明暗を足す
-      ember(color, 0.15 + oni[o + 8]! + 0.08 * (0.5 + 0.5 * Math.sin(gait)), hue);
+      // 袋は沈んだ色。個体ごとのオフセットに、歩調ぶんの明暗を足す。
+      // ここを上げると袋が「赤い服」に見え始める。薄暗い塩化ビニルに見せるには、
+      // 面の色は闇に沈めておいて、明るみは人魂の灯りだけに作らせるほうがよい
+      ember(color, 0.09 + oni[o + 8]! + 0.06 * (0.5 + 0.5 * Math.sin(gait)), hue);
       bodies.setColorAt(i, color);
-      heads.setColorAt(i, color);
-      hats.setColorAt(i, color);
-      horns.setColorAt(i * 2, color);
-      horns.setColorAt(i * 2 + 1, color);
-
-      // 頭。衣の尖った先に載せる。型によって大きさだけが変わる
-      // 衣の丈の 94% あたりが襟。ROBE_H を変えたら頭もついてくるよう比で書く
-      const headY = y + (ROBE_H * 0.94 + HEAD_R * headMul) * size;
-      dummy.position.set(x, headY, z);
-      dummy.rotation.set(0, yaw, 0);
-      dummy.scale.setScalar(size * headMul);
-      dummy.updateMatrix();
-      heads.setMatrixAt(i, dummy.matrix);
-
-      // 角。型 1 の頭に 2 本、左右へ開いて生やす。他の型は scale 0 で畳む
-      const hornScale = kind === 1 ? size : 0;
-      const hornY = headY + HEAD_R * headMul * size * 0.6;
-      const hornOff = HEAD_R * headMul * size * HORN_SPREAD;
-      for (let h = 0; h < 2; h++) {
-        const lean = h === 0 ? -1 : 1;
-        dummy.position.set(x + nx * hornOff * lean, hornY, z + nz * hornOff * lean);
-        // 回転順が YXZ なので、z 成分が体の向きに対する左右の開きになる
-        dummy.rotation.set(-0.16, yaw, 0.34 * lean);
-        dummy.scale.setScalar(hornScale);
-        dummy.updateMatrix();
-        horns.setMatrixAt(i * 2 + h, dummy.matrix);
-      }
-
-      // 笠。型 0 の頭に載せる。型 1・2 は scale 0 で畳む
-      dummy.position.set(x, headY + HEAD_R * headMul * size * 0.35, z);
-      dummy.rotation.set(-0.07, yaw, Math.sin(gait) * 0.06);
-      dummy.scale.setScalar(kind === 0 ? size : 0);
-      dummy.updateMatrix();
-      hats.setMatrixAt(i, dummy.matrix);
-
     }
 
     // 人魂。尾の粒 j は「その人魂が j·TAIL_DT 秒前にいた場所」
@@ -783,13 +806,7 @@ export const nightParade: SceneModule = {
     ccol.needsUpdate = true;
 
     bodies.instanceMatrix.needsUpdate = true;
-    heads.instanceMatrix.needsUpdate = true;
-    horns.instanceMatrix.needsUpdate = true;
-    hats.instanceMatrix.needsUpdate = true;
     if (bodies.instanceColor) bodies.instanceColor.needsUpdate = true;
-    if (heads.instanceColor) heads.instanceColor.needsUpdate = true;
-    if (horns.instanceColor) horns.instanceColor.needsUpdate = true;
-    if (hats.instanceColor) hats.instanceColor.needsUpdate = true;
 
     // 実光源は人魂そのものに持たせる。灯りと明るむ場所がずれない
     for (let k = 0; k < lamps.length; k++) {
