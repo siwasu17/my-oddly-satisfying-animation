@@ -16,24 +16,25 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
  * 同じ絵は戻ってこない（灯りの居場所だけは毎フレーム t から作り直している）。
  * カメラ: 環の全周を必ず画面へ収める。
  *
- * 一体の姿は「平笠をかぶり、黒いマントをまとった人影」。顔も手足も無い。
- * 笠・肩・裾の 3 つだけで人の形を作っている。
- * マントの形はすべて頂点シェーダが毎フレーム組み立てる（CPU 側には戻ってこない）。
- * 笠だけは素の浅い円錐で、マントの首の位置へ毎フレーム載せ直している。
+ * 一体の姿は「平笠をかぶった、シーツおばけ」。顔も手足も無い。
+ * 頭も胴も 1 枚の布で、間に首も肩も無い。上が丸く落ちて、下へ向かって
+ * ほんの少しだけ開く釣鐘。角を作らないのがすべてで、どこか 1 か所でも
+ * 折れ目が立つと、とたんに可愛くなくなる。
+ * シーツの形はすべて頂点シェーダが毎フレーム組み立てる（CPU 側には戻ってこない）。
+ * 笠だけは素の浅い円錐で、シーツの頭の位置へ毎フレーム載せ直している。
  *
- * マントは回転体として作っていない。円錐を細らせただけの形は、どれだけ襞を
- * 足しても「スカート」にしか見えない。ここでは断面そのものを組み立てている。
- * 左右（wideR）と前後（deepR）を別々に持ち、肩では前後に薄い楕円、
- * 裾へ向かって丸く広がる。輪郭を人影として読ませているのは次の 4 つ。
- *   - 笠。輪郭の中でいちばん横へ張り出す部分で、型ごとに直径を大きく振ってある。
- *     マントより明るい色を持つ唯一の面でもあり、ここで明暗の差を付けないと、
- *     人影ではなく縦に伸びた霞の塊にしか見えない
- *   - 肩の衣桁。左右にだけ張り出させる。前後へ出すと胴が一様に太って、
- *     「肩から吊られた布」ではなく「太った」に見える
- *   - 裾が背中側へ流れ、背中側だけ前より長く垂れる。前後の非対称はここだけで
- *     作っていて、これが無いとどちらを向いて歩いているのか分からない円錐に戻る
- *   - 前の合わせ目。正面だけ裾を高く切り上げて布が開いて見せる。
- *     閉じた釣鐘のままだと、羽織っているのではなく着ぐるみに見える
+ * 丸さを作っているのは次の 4 つ。
+ *   - 釣鐘の指数。1 に近づけると玉、大きくすると円筒。2.6 にすると
+ *     頭だけが丸くて胴はほぼまっすぐ落ちる、という比率になる
+ *   - 縦横比。2 を超えると影法師、1.2 を割ると団子。1.6 に置いてある
+ *   - 裾の波。周回りに 5〜7 の山を丸くうねらせる。「シーツを被った」の
+ *     いちばんの目印がここで、ぎざぎざに切るとボロ布に見える
+ *   - 腕のこぶ。左右へ 2 つだけ小さく出す。角度方向を尖らせて前後へは出さないので、
+ *     胴が太るのではなく「布の下で腕を張っている」に見える
+ *
+ * 笠は輪郭の中でいちばん横へ張り出す部分で、型ごとに直径を大きく振ってある。
+ * シーツより明るい色を持つ唯一の面でもあり、ここで明暗の差を付けないと、
+ * おばけではなく縦に伸びた霞の塊にしか見えない。
  *
  * ただし「そこに在る物」としては描かない。物として立たせると、行列が
  * 夜道を歩いてくる絵が生々しくなりすぎて、寝る前に眺めるものではなくなる。
@@ -45,7 +46,7 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
  *   (2) 粗さを 0.97 まで上げて照りを消した。
  *   (3) 裾の切り口は硬いまま残さず、消える手前をなだらかに溶かす。
  *       そのうえで 1 体につき 22 粒の塵をまとわせ、輪郭の線を粒で食わせる。
- *       塵はマントの面の少し外側を巡りながら裾から湧いて、首の高さで消える。
+ *       塵はシーツの面の少し外側を巡りながら裾から湧いて、頭の高さで消える。
  *       粒は丈の 4 割もある大きさで、1 粒では形が分からないほど薄い。
  *       小さく硬い粒にすると、霞ではなく蛍の群れになってしまう。
  *       笠だけはフレネルを掛けない。この画角では笠をほぼ真上から見下ろすので、
@@ -53,13 +54,14 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
  *
  * 「環の全周を見せる」と「一体のかたちを読ませる」は画角の上で両立しない。
  * この fov（48°）と環の半径（12±4.4）では、全周を入れると一体は 20〜40px にしかならず、
- * 襞も笠の反りも輪郭としては潰れる。ここでは全周のほうを取った。
+ * 腕のこぶも笠の反りも輪郭としては潰れる。ここでは全周のほうを取った。
  * だから造形の作り分けは「一目で分かる違い」を狙っていない。近づいて見た人にだけ
  * 見える差として置いてあり、遠目には帯の質感のゆらぎとしてだけ効けばよい。
  * 一体を読ませたくなったら、それは画角を変える判断になる（このシーンの芯が変わる）。
  * 音: 手前の鳥居をくぐるたびに遠くで鈴が鳴り、底に地鳴りを敷く。
- * スコープ外: 顔、手足、名前の付く個別の妖怪。そして「一体が何者か分かること」自体。
- * 3 つの型（並み・笠が大きくずんぐり・笠が小さく背が高い）と、体型・襞・
+ * スコープ外: 顔（目も含む）、手足、名前の付く個別の妖怪。
+ * そして「一体が何者か分かること」自体。
+ * 3 つの型（並み・笠が大きくずんぐり・笠が小さく小柄）と、体型・裾の波の数・
  * 明度の振れで、帯が均質に見えないところまでを担う。
  * 人魂も物理で飛ばさない（軌道は時刻の関数で、粒どうしも干渉しない）。
  * 群れの相互作用も扱わない
@@ -167,13 +169,13 @@ const here = new THREE.Vector3();
 const ahead = new THREE.Vector3();
 /** 人魂の粒 1 つぶんの居場所を受け取る作業用。 */
 const wisp = new THREE.Vector3();
-/** 笠を載せる場所（マントの首の位置）を受け取る作業用。 */
+/** 笠を載せる場所（シーツの頭の位置）を受け取る作業用。 */
 const perch = new THREE.Vector3();
 
 const oni = new Float32Array(COUNT * STRIDE);
 /**
  * 型ごとの笠の大きさ。
- * マントの形を決める値はインスタンス属性としてシェーダへ渡すが、
+ * シーツの形を決める値はインスタンス属性としてシェーダへ渡すが、
  * 笠は素のメッシュなので、これだけは CPU 側に残して毎フレームの行列に使う。
  */
 const brim = new Float32Array(COUNT);
@@ -294,20 +296,21 @@ function soulAt(s: number, tt: number, out: THREE.Vector3): THREE.Vector3 {
 }
 
 /**
- * マントの丈。裾から肩（首の付け根）まで。笠はこの上に載る。
+ * シーツの丈。裾から頭のてっぺんまで。笠はこの上に載る。
  *
- * 裾の直径は太いところで 1.3 前後あるので、丈をここまで取ってようやく
- * 縦横比が 1.8 に届く。これより縮めると、歩く団子にしか見えない。
+ * 人影だったころより 3 割ほど詰めてある。縦に伸ばすと痩せて見えて、
+ * 「まるっこい」から遠ざかる。裾の直径は 1.0 前後なので縦横比は 1.5 ほど。
+ * かわいさは縦横比で決まる。2 を超えると影法師、1.2 を割ると団子になる。
  */
-const CLOAK_H = 2.15;
+const SHEET_H = 1.55;
 /**
- * マントを刻む数。縦（裾から首まで）と横（周回り）。
- * 襞は周回り 11 波まで入れてあるので、横はその 2 倍以上ないと襞が消える。
+ * シーツを刻む数。縦（裾から頭まで）と横（周回り）。
+ * 裾の波は周回り 7 山まで入れてあるので、横はその 5 倍以上ないと角が立つ。
  */
-const CLOAK_RINGS = 22;
-const CLOAK_SEGS = 32;
+const SHEET_RINGS = 22;
+const SHEET_SEGS = 40;
 /** 裾が閉じる位置。ここから下は底として塞がる。 */
-const CLOAK_FLOOR = -0.08;
+const SHEET_FLOOR = -0.08;
 
 /**
  * 体が左右前後へ振れる幅（首の高さで）。
@@ -320,39 +323,40 @@ const SWAY_Z = 0.13;
 const HAT_R = 0.38;
 const HAT_H = 0.17;
 /**
- * 笠を載せる高さ（マントの丈に対する割合）。
- * 頭巾のふくらみ（0.84〜0.94）に縁が食い込むところまで下げる。
- * 上げると縁と頭巾のあいだに首が覗いて、笠が宙に浮いて見える。
+ * 笠を載せる高さ（シーツの丈に対する割合）。
+ * 丸い頭に縁が食い込むところまで下げる。
+ * 上げると笠が頭のてっぺんに乗っただけになり、宙に浮いて見える。
  */
-const HAT_AT = 0.87;
+const HAT_AT = 0.84;
 
 /**
- * 型ごとの姿。[頭巾のふくらみ, 裾が背中へ流れる量, 笠の大きさ]
+ * 型ごとの姿。[腕のこぶの出っ張り, 裾が背中へなびく量, 笠の大きさ]
  *
- * 0 = 並み、1 = 笠が大きくずんぐりした者、2 = 笠が小さく痩せて裾を長く引く者。
- * 遠景で効くのは面の明暗ではなく輪郭なので、笠の直径と裾の流れを型ごとに大きく振ってある。
- * 笠は輪郭の中でいちばん横に張り出す部分、裾の流れは影が前後に非対称になる唯一の手掛かり。
+ * 0 = 並み、1 = 笠が大きくずんぐりした者、2 = 笠が小さく小柄な者。
+ * 遠景で効くのは面の明暗ではなく輪郭なので、笠の直径を型ごとに大きく振ってある。
+ * 腕のこぶは近くで見たときだけ効く。遠目には輪郭のふくらみのゆらぎになる。
  */
-const CLOAK_KIND: [number, number, number][] = [
-  [0.1, 0.16, 1.0],
-  [0.13, 0.1, 1.18],
-  [0.07, 0.26, 0.8],
+const SHEET_KIND: [number, number, number][] = [
+  [0.085, 0.06, 1.0],
+  [0.11, 0.04, 1.18],
+  [0.06, 0.1, 0.82],
 ];
 
 /**
- * マントの太さの平均。h は 0 が裾、1 が首。
+ * シーツの太さ。h は 0 が裾、1 が頭のてっぺん。
  *
- * シェーダ側の断面は左右と前後で太さが違う（回転体ではない）ので、
- * ここではその平均だけを返す。塵の居場所を決めるのに使う。
+ * **下の GLSL 版と骨格を揃えてある。** こちらは塵の居場所を決めるのに使い、
+ * 実際に描かれる形（腕のこぶ・たるみ・裾の波）はシェーダ側が作る。
  */
-function cloakRadius(h: number): number {
+function sheetRadius(h: number): number {
   const k = h < 0 ? 0 : h > 1 ? 1 : h;
-  const spread = Math.pow(1 - k, 1.45);
-  let r = 0.16 + 0.285 * spread;
-  // 肩から上は襟としてすぼまる
-  r += (0.085 - r) * smoothstep(0.78, 0.96, k);
+  // 卵形。指数を 1.9 にすると、上から裾までひと続きに丸く膨らむ
+  let r = 0.46 * Math.sqrt(Math.max(0.004, 1 - Math.pow(k, 1.9)));
+  // 裾だけわずかに開く
+  const low = 1 - k;
+  r *= 1 + 0.1 * low * low * low;
   // 裾の下で閉じる
-  return r * smoothstep(CLOAK_FLOOR, 0.02, h);
+  return r * smoothstep(SHEET_FLOOR, 0.02, h);
 }
 
 function smoothstep(a: number, b: number, x: number): number {
@@ -362,32 +366,32 @@ function smoothstep(a: number, b: number, x: number): number {
 }
 
 /**
- * マントの骨格。格子だけを置き、実際の形は頂点シェーダが作る。
+ * シーツの骨格。格子だけを置き、実際の形は頂点シェーダが作る。
  *
  * 頂点は位置ではなく「周方向の角度 aAng」と「裾からの高さ aH」を持つ。
- * シェーダはその 2 つから毎フレーム形を組み立て直すので、襞も肩の張りも
- * 裾の流れも、CPU 側には一切戻ってこない。
+ * シェーダはその 2 つから毎フレーム形を組み立て直すので、たるみも腕のこぶも
+ * 裾の波も、CPU 側には一切戻ってこない。
  *
- * ここで置く素の形（cloakRadius の回転体）は描かれない。頂点の並びと
+ * ここで置く素の形（sheetRadius の回転体）は描かれない。頂点の並びと
  * 三角形のつなぎ方を決めているだけで、位置はシェーダが全部上書きする。
  */
-function buildCloak(): THREE.BufferGeometry {
-  const vCount = (CLOAK_RINGS + 1) * (CLOAK_SEGS + 1);
+function buildSheet(): THREE.BufferGeometry {
+  const vCount = (SHEET_RINGS + 1) * (SHEET_SEGS + 1);
   const pos = new Float32Array(vCount * 3);
   const nor = new Float32Array(vCount * 3);
   const ang = new Float32Array(vCount);
   const hgt = new Float32Array(vCount);
-  const idx = new Uint16Array(CLOAK_RINGS * CLOAK_SEGS * 6);
+  const idx = new Uint16Array(SHEET_RINGS * SHEET_SEGS * 6);
 
-  for (let i = 0; i <= CLOAK_RINGS; i++) {
-    const h = CLOAK_FLOOR + (1 - CLOAK_FLOOR) * (i / CLOAK_RINGS);
-    const r = cloakRadius(h);
-    for (let j = 0; j <= CLOAK_SEGS; j++) {
-      const a = (j / CLOAK_SEGS) * TAU;
-      const v = i * (CLOAK_SEGS + 1) + j;
+  for (let i = 0; i <= SHEET_RINGS; i++) {
+    const h = SHEET_FLOOR + (1 - SHEET_FLOOR) * (i / SHEET_RINGS);
+    const r = sheetRadius(h);
+    for (let j = 0; j <= SHEET_SEGS; j++) {
+      const a = (j / SHEET_SEGS) * TAU;
+      const v = i * (SHEET_SEGS + 1) + j;
       // シェーダが上書きするので、ここは素の回転体のままでよい
       pos[v * 3] = Math.cos(a) * r;
-      pos[v * 3 + 1] = h * CLOAK_H;
+      pos[v * 3 + 1] = h * SHEET_H;
       pos[v * 3 + 2] = Math.sin(a) * r;
       nor[v * 3] = Math.cos(a);
       nor[v * 3 + 2] = Math.sin(a);
@@ -397,11 +401,11 @@ function buildCloak(): THREE.BufferGeometry {
   }
 
   let k = 0;
-  for (let i = 0; i < CLOAK_RINGS; i++) {
-    for (let j = 0; j < CLOAK_SEGS; j++) {
-      const a0 = i * (CLOAK_SEGS + 1) + j;
+  for (let i = 0; i < SHEET_RINGS; i++) {
+    for (let j = 0; j < SHEET_SEGS; j++) {
+      const a0 = i * (SHEET_SEGS + 1) + j;
       const a1 = a0 + 1;
-      const b0 = a0 + CLOAK_SEGS + 1;
+      const b0 = a0 + SHEET_SEGS + 1;
       const b1 = b0 + 1;
       idx[k++] = a0;
       idx[k++] = b0;
@@ -421,12 +425,12 @@ function buildCloak(): THREE.BufferGeometry {
   return geo;
 }
 
-/** マントのシェーダが読む時刻。update() から毎フレーム入れ直す。 */
-const cloakTime = { value: 0 };
+/** シーツのシェーダが読む時刻。update() から毎フレーム入れ直す。 */
+const sheetTime = { value: 0 };
 
 /**
  * 霞へほどけた薄い膜として布を描くための共通の設定。
- * マントと笠で同じ透け方にしておかないと、笠だけが物として立って浮く。
+ * シーツと笠で同じ透け方にしておかないと、笠だけが物として立って浮く。
  */
 function veilMaterial(): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
@@ -444,16 +448,16 @@ function veilMaterial(): THREE.MeshStandardMaterial {
 }
 
 /**
- * マントの材。`MeshStandardMaterial` に頂点シェーダとフラグメントシェーダを差し込む。
+ * シーツの材。`MeshStandardMaterial` に頂点シェーダとフラグメントシェーダを差し込む。
  *
  * 素の three の照明とブルームをそのまま使いたいので、`ShaderMaterial` で
  * 書き下ろさずに `onBeforeCompile` で組み込みのチャンクを置き換えている。
  *
- * 位置を動かすと法線が合わなくなるので、形を返す関数 cloakPoint() を 3 回呼び、
+ * 位置を動かすと法線が合わなくなるので、形を返す関数 sheetPoint() を 3 回呼び、
  * 角度方向と高さ方向へずらした点との外積から法線を作り直している。
  * こうしないと、襞や肩の張りのところで陰影が裏返る。
  */
-function cloakMaterial(): THREE.MeshStandardMaterial {
+function sheetMaterial(): THREE.MeshStandardMaterial {
   const mat = veilMaterial();
 
   /**
@@ -461,12 +465,12 @@ function cloakMaterial(): THREE.MeshStandardMaterial {
    * three はコンパイル済みプログラムをマテリアルの「パラメータ」で引いたキャッシュから
    * 引き当てるが、そのキーに onBeforeCompile の中身は入らない。パラメータが同じ
    * マテリアル（ここでは笠）が他にあると、そちらのプログラムが使い回されて、
-   * マントが素の回転体のまま描かれる。
+   * シーツが素の回転体のまま描かれる。
    */
-  mat.customProgramCacheKey = () => 'nightParade-cloak';
+  mat.customProgramCacheKey = () => 'nightParade-sheet';
 
   mat.onBeforeCompile = (shader) => {
-    shader.uniforms.uTime = cloakTime;
+    shader.uniforms.uTime = sheetTime;
 
     shader.vertexShader = shader.vertexShader
       .replace(
@@ -478,72 +482,68 @@ function cloakMaterial(): THREE.MeshStandardMaterial {
         attribute float aH;
         attribute float aPhase;
         attribute float aGait;
-        attribute float aHood;
+        attribute float aArm;
         attribute float aTrail;
+        attribute float aLobes;
         attribute float aSeed;
         // 裾の溶かし方に使う。x = 周方向の角度, y = 裾からの高さ, z = 個体の種
-        varying vec3 vCloak;
-        vec3 cloakPos;
+        varying vec3 vSheet;
+        vec3 sheetPos;
 
         /**
-         * マントの一点。a は周方向、h は裾（0）から首（1）まで。
+         * シーツの一点。a は周方向、h は裾（0）から頭のてっぺん（1）まで。
          *
-         * 回転体として作らない。円錐を細らせただけの形は、どれだけ襞を足しても
-         * 「スカート」にしか見えず、布を肩から羽織っている感じが出ない。
-         * ここでは断面そのものを組み立てる。左右（wideR）と前後（deepR）を
-         * 別々に持ち、肩では前後に薄い楕円、裾へ向かって丸く広がる。
+         * 頭も胴も 1 枚の布で、間に首も肩も無い。上が丸く落ちて、
+         * 下へ向かってほんの少しだけ開く釣鐘。角を作らないのがすべてで、
+         * どこか 1 か所でも折れ目が立つと、とたんに可愛くなくなる。
          */
-        vec3 cloakPoint(float a, float h) {
+        vec3 sheetPoint(float a, float h) {
           float k = clamp(h, 0.0, 1.0);
-          float fwd = sin(a);   // +1 が進行方向、-1 が背中
           float lat = cos(a);   // ±1 が左右
+          float fwd = sin(a);   // +1 が進行方向
 
-          // 裾へ向かう量。肩から下がるほど布が開く
-          float spread = pow(1.0 - k, 1.45);
+          // 卵形。指数を 1.9 にすると、上から裾までひと続きに丸く膨らむ。
+          // 2.5 を超えると胴がまっすぐ落ちて切り株になり、丸さが消える。
+          //
+          // **てっぺんを完全に 0 まで絞ってはいけない。** 半径が 0 になると
+          // その輪の頂点が 1 点に重なり、法線を作るための外積が 0 ベクトルになる。
+          // normalize(0) は NaN で、NaN は透明度の計算まで流れて画面全体を潰す。
+          // 下限を残しておけば、てっぺんは小さな面として閉じる
+          float r = 0.46 * sqrt(max(0.004, 1.0 - pow(k, 1.9)));
 
-          // 断面。肩は前後に薄く、裾は丸い。
-          // 裾を広げすぎると縦横比が 1.5 を割って、人影ではなく釣鐘に見える
-          float wideR = 0.19 + 0.31 * spread;
-          float deepR = 0.13 + 0.26 * spread;
+          // 裾だけほんの少し開く。卵形だけだと下が閉じすぎて芋虫に見える
+          float low = 1.0 - k;
+          r *= 1.0 + 0.1 * low * low * low;
 
-          // 肩の衣桁。ここだけ左右へ張り出させると、布が肩から吊られて見える。
-          // 前後へは出さない。出すと肩ではなく胴が太ったように見える
-          float yoke = smoothstep(0.64, 0.78, k) * (1.0 - smoothstep(0.80, 0.92, k));
-          wideR *= 1.0 + yoke * 0.26;
+          // 腕のこぶ。左右へ 2 つだけ、小さく出す。
+          // 角度方向を尖らせて（4 乗）前後へは出さないので、胴が太るのではなく
+          // 「布の下で腕を張っている」に見える
+          float arm = smoothstep(0.38, 0.50, k) * (1.0 - smoothstep(0.58, 0.70, k));
+          r += arm * aArm * pow(abs(lat), 4.0);
 
-          // 肩から上は襟。前後左右とも一気にすぼめる
-          float collar = smoothstep(0.78, 0.96, k);
-          wideR = mix(wideR, 0.085, collar);
-          deepR = mix(deepR, 0.085, collar);
-
-          // 頭巾のふくらみ。笠の下に頭がある、と見せるためだけの小さな瘤
-          float hood = smoothstep(0.86, 0.95, k) * (1.0 - smoothstep(0.95, 1.04, k)) * aHood;
-          wideR += hood;
-          deepR += hood;
+          // 布のたるみ。大きな丸い起伏だけにして、細かい皺は入れない。
+          // 皺を足すとくしゃくしゃになって、シーツではなくゴミ袋に戻る
+          r *= 1.0
+            + low * 0.09 * sin(a * 3.0 + aSeed)
+            + low * 0.05 * sin(a * 5.0 - aSeed * 1.7)
+            + low * 0.06 * sin(uTime * aGait * 0.45 + a * 2.0 + aSeed);
 
           // 裾の下で閉じる
-          float close = smoothstep(${CLOAK_FLOOR.toFixed(2)}, 0.02, h);
-          wideR *= close;
-          deepR *= close;
+          r *= smoothstep(${SHEET_FLOOR.toFixed(2)}, 0.02, h);
 
-          // 縦の襞。肩から吊られた布が、裾へ向かって襞を開く。
-          // 歩調の項を混ぜてあるので、襞は止まらずゆっくり入れ替わる
-          float fold = 1.0
-            + spread * 0.10 * sin(a * 5.0 + aSeed)
-            + spread * 0.05 * sin(a * 9.0 - aSeed * 1.7)
-            + spread * 0.07 * sin(uTime * aGait * 0.5 + a * 3.0 + aSeed);
+          float x = lat * r;
+          float z = fwd * r;
 
-          float x = lat * wideR * fold;
-          float z = fwd * deepR * fold;
+          // 歩くたびに裾が後ろへなびく。ごく浅く。
+          // 深く引くと影法師の鋭さが出て、丸さが消える
+          z -= low * low * aTrail * (1.0 + 0.4 * sin(uTime * aGait * 0.5 + aPhase));
 
-          // 裾が背中側へ流れる。前後の非対称はここだけで作っている。
-          // これが無いと、どちらを向いて歩いているのか分からない円錐に戻る
-          z -= spread * close * aTrail * (1.0 + 0.35 * sin(uTime * aGait * 0.5 + aPhase));
-
-          // 背中側の裾が前より長く垂れる
-          float y = h * ${CLOAK_H.toFixed(2)} - spread * (0.10 - 0.10 * fwd);
-          // 裾のはためき
-          y += spread * 0.05 * sin(uTime * aGait * 0.6 + a * 2.0 + aSeed);
+          // 裾の波。「シーツを被ったおばけ」のいちばんの目印はここ。
+          // 山の数 aLobes は整数でなければならない（一周して閉じなくなる）
+          float y = h * ${SHEET_H.toFixed(2)};
+          y -= low * low * (0.07 + 0.14 * sin(a * aLobes + aSeed));
+          // 歩くたびに裾がふわりと持ち上がる
+          y += low * 0.05 * sin(uTime * aGait * 0.6 + a * 3.0 + aSeed);
 
           // ゆらゆら。裾を軸にして上ほど大きく振れる。
           // 2 つの周期を直交する向きに当てているので、まっすぐ前後には揺れない
@@ -557,21 +557,24 @@ function cloakMaterial(): THREE.MeshStandardMaterial {
       .replace(
         '#include <beginnormal_vertex>',
         /* glsl */ `
-        cloakPos = cloakPoint(aAng, aH);
-        vec3 clA = cloakPoint(aAng + 0.03, aH);
-        vec3 clH = cloakPoint(aAng, aH + 0.03);
-        vec3 objectNormal = normalize(cross(clH - cloakPos, clA - cloakPos));
-        vCloak = vec3(aAng, aH, aSeed);
+        sheetPos = sheetPoint(aAng, aH);
+        vec3 shA = sheetPoint(aAng + 0.03, aH);
+        vec3 shH = sheetPoint(aAng, aH + 0.03);
+        vec3 shN = cross(shH - sheetPos, shA - sheetPos);
+        // 念のための保険。ここで 0 ベクトルを normalize すると NaN が出て、
+        // その NaN が透明度まで流れて画面が真っ黒になる
+        vec3 objectNormal = dot(shN, shN) > 1e-12 ? normalize(shN) : vec3(0.0, 1.0, 0.0);
+        vSheet = vec3(aAng, aH, aSeed);
       `,
       )
-      .replace('#include <begin_vertex>', 'vec3 transformed = cloakPos;');
+      .replace('#include <begin_vertex>', 'vec3 transformed = sheetPos;');
 
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
         /* glsl */ `
         #include <common>
-        varying vec3 vCloak;
+        varying vec3 vSheet;
       `,
       )
       .replace(
@@ -581,24 +584,20 @@ function cloakMaterial(): THREE.MeshStandardMaterial {
         // 裾の縁の溶け具合。下で計算して、いちばん最後の合成で透明度に掛ける
         float hemA = 1.0;
         {
-          float a = vCloak.x;
-          float h = vCloak.y;
-          float sd = vCloak.z;
+          float a = vSheet.x;
+          float h = vSheet.y;
+          float sd = vSheet.z;
 
-          // 裾の縁。周方向にうねる高さで切り落とすので、下端が個体ごとに違う。
-          // 袋のときのような深い裂けは入れない。布の裾はまっすぐ落ちているほうが
-          // 「まとっている」に見えて、ぎざぎざが勝つとまたゴミ袋に戻る
-          float n = 0.50 * sin(a * 4.0 + sd * 3.1)
-                  + 0.32 * sin(a * 7.0 - sd * 1.7)
-                  + 0.18 * sin(a * 13.0 + sd * 5.3);
-          float hem = 0.02 + 0.05 * (0.5 + 0.5 * n);
-          // 前の合わせ目。進行方向の正面だけ裾を高く切り上げて、布が開いて見せる。
-          // 閉じた釣鐘のままだと、羽織っているのではなく着ぐるみに見える
-          hem += smoothstep(0.72, 0.99, sin(a)) * 0.20;
+          // 裾の縁。ここでは形をほとんど削らない。
+          // 裾の波は頂点側で丸くうねらせてあり、ぎざぎざに切り落とすと
+          // せっかくの丸い波形が刻まれて、おばけではなくボロ布に見える。
+          // ここでやるのは、霧へ溶かすための最後のひと削りだけ
+          float n = 0.5 + 0.5 * sin(a * 4.0 + sd * 3.1);
+          float hem = 0.012 + 0.022 * n;
           if (h < hem) discard;
           // 切り口をそのまま残すと縁が硬くて「切り抜いた物」に見える。
           // 消える手前をなだらかにして、裾が霧へ溶けていくようにする
-          hemA *= smoothstep(hem, hem + 0.09, h);
+          hemA *= smoothstep(hem, hem + 0.07, h);
         }
       `,
       )
@@ -623,7 +622,7 @@ function cloakMaterial(): THREE.MeshStandardMaterial {
 /**
  * 平笠。浅い円錐ひとつ。
  *
- * マントと同じ透け方の材を使うが、フレネルは掛けない。
+ * シーツと同じ透け方の材を使うが、フレネルは掛けない。
  * この画角では笠をほぼ真上から見下ろすことになり、面が視線を向くので、
  * フレネルを掛けると笠だけがまるごと消えてしまう。
  * 輪郭の中でいちばん横に張り出す部分なので、消えると人影に読めなくなる。
@@ -700,7 +699,7 @@ function buildGate(): THREE.Group {
    * 行列が鳥居の中ほどをくぐっているように見えてしまう。
    *
    * 高さは、いちばん背の高い妖怪が貫に当たらないところから決める。
-   * マントの丈は 2.15、背丈の倍率の上限は 1.10 なので首まで約 2.4。笠を載せて約 2.5。
+   * シーツの丈は 1.55、背丈の倍率の上限は 1.10 なので頭まで約 1.7。笠を載せて約 1.9。
    * 歩調の弾みと上端のゆらぎを足しても 2.8 には届かない。貫をその上（2.95）へ置くと、
    * 桁まで 3.8 要る。これ以上高くすると、並みの背丈の妖怪に対して門が過大に見える。
    */
@@ -740,10 +739,10 @@ function buildGate(): THREE.Group {
   return gate;
 }
 
-/** 霞にほどけかけた笠とマントの人影が、うねる夜道をどこまでも巡っていく。 */
+/** 霞にほどけかけた笠とシーツのおばけが、うねる夜道をどこまでも巡っていく。 */
 export const nightParade: SceneModule = {
   name: 'Night Parade',
-  desc: '闇の環を練り歩く笠とマントの人影に、人魂が尾を引いて寄り添い漂う。',
+  desc: '闇の環を練り歩く笠をかぶったシーツおばけに、人魂が尾を引いて寄り添い漂う。',
   // 俯瞰しすぎると鳥居が潰れるので、環が見える高さぎりぎりまで下げている
   camera: { pos: [0, 15, 30], target: [0, 1.2, 0] },
 
@@ -756,12 +755,13 @@ export const nightParade: SceneModule = {
     let s = 0.4137;
     const rnd = (): number => (s = (s * 9301 + 0.49297) % 1);
 
-    // マントの形を決める値は、個体ごとに 1 度だけ決めてシェーダへ渡す。
+    // シーツの形を決める値は、個体ごとに 1 度だけ決めてシェーダへ渡す。
     // 毎フレーム CPU から送り直す必要がないので、インスタンス属性として持たせる
     const phase = new Float32Array(COUNT);
     const gait = new Float32Array(COUNT);
-    const hood = new Float32Array(COUNT);
+    const arm = new Float32Array(COUNT);
     const trail = new Float32Array(COUNT);
+    const lobes = new Float32Array(COUNT);
     const seed = new Float32Array(COUNT);
 
     for (let i = 0; i < COUNT; i++) {
@@ -784,15 +784,17 @@ export const nightParade: SceneModule = {
       // 型 1（ずんぐり）だけは丈と幅も振り直す。輪郭の差は形の式より先に効く
       oni[o + 2] = kind === 1 ? size * 0.88 : size;
       oni[o + 5] = kind === 1 ? wide * 1.14 : wide;
-      // マントの明度のオフセット。狭いと帯が一色に貼り付くので、広めに振る
+      // シーツの明度のオフセット。狭いと帯が一色に貼り付くので、広めに振る
       oni[o + 8] = rnd() * 0.22 - 0.05;
 
-      const preset = CLOAK_KIND[kind]!;
+      const preset = SHEET_KIND[kind]!;
       phase[i] = oni[o + 4]!;
       gait[i] = oni[o + 3]!;
-      hood[i] = preset[0] + rnd() * 0.03;
-      // 裾が背中へ流れる量。ここが個体ごとに違うと、列に「急いでいる者」が混ざる
+      arm[i] = preset[0] + rnd() * 0.025;
+      // 裾がなびく量。ここが個体ごとに違うと、列に「急いでいる者」が混ざる
       trail[i] = preset[1] * (0.8 + rnd() * 0.45);
+      // 裾の波の山の数。一周して閉じるよう整数にする
+      lobes[i] = 5 + Math.floor(rnd() * 2);
       // 笠の大きさ。型で大きく振ったうえに、個体ごとの揺らぎを足す
       brim[i] = preset[2] * (0.92 + rnd() * 0.16);
       // 襞と裾の種。ここが個体ごとに違うから、同じ影が二つと無い
@@ -821,17 +823,18 @@ export const nightParade: SceneModule = {
       dust[o + 2] = 0.035 + rnd() * 0.075;
     }
 
-    // マント。形は頂点シェーダが作るので、ここでは骨格と個体ごとの値だけ渡す
-    const cloak = buildCloak();
-    cloak.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phase, 1));
-    cloak.setAttribute('aGait', new THREE.InstancedBufferAttribute(gait, 1));
-    cloak.setAttribute('aHood', new THREE.InstancedBufferAttribute(hood, 1));
-    cloak.setAttribute('aTrail', new THREE.InstancedBufferAttribute(trail, 1));
-    cloak.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seed, 1));
+    // シーツ。形は頂点シェーダが作るので、ここでは骨格と個体ごとの値だけ渡す
+    const sheet = buildSheet();
+    sheet.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phase, 1));
+    sheet.setAttribute('aGait', new THREE.InstancedBufferAttribute(gait, 1));
+    sheet.setAttribute('aArm', new THREE.InstancedBufferAttribute(arm, 1));
+    sheet.setAttribute('aTrail', new THREE.InstancedBufferAttribute(trail, 1));
+    sheet.setAttribute('aLobes', new THREE.InstancedBufferAttribute(lobes, 1));
+    sheet.setAttribute('aSeed', new THREE.InstancedBufferAttribute(seed, 1));
 
-    bodies = new THREE.InstancedMesh(cloak, cloakMaterial(), COUNT);
+    bodies = new THREE.InstancedMesh(sheet, sheetMaterial(), COUNT);
     bodies.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    // 襞とゆらぎでシェーダが外へ膨らむので、CPU 側の外接球では足りない
+    // たるみとゆらぎでシェーダが外へ膨らむので、CPU 側の外接球では足りない
     bodies.frustumCulled = false;
     root.add(bodies);
 
@@ -867,7 +870,7 @@ export const nightParade: SceneModule = {
       return points;
     };
 
-    // 人影にまとわりつく塵。マントの面の少し外側を巡りながら立ちのぼって消える
+    // おばけにまとわりつく塵。シーツの面の少し外側を巡りながら立ちのぼって消える
     motes = wispPoints(COUNT * DUST_PER, DUST_SIZE, hazeSprite());
     root.add(motes);
 
@@ -898,8 +901,8 @@ export const nightParade: SceneModule = {
 
   update(t) {
     const hue = drift(t);
-    // マントの形はシェーダが t から作り直す。CPU 側は時刻を渡すだけ
-    cloakTime.value = t;
+    // シーツの形はシェーダが t から作り直す。CPU 側は時刻を渡すだけ
+    sheetTime.value = t;
     // 行列の先頭が道のどこにいるか。各自の位置に足すだけで、全員が同じ速さで進む
     const head = t / LAP;
 
@@ -927,15 +930,15 @@ export const nightParade: SceneModule = {
       const side = oni[o + 1]!;
       const bob = Math.abs(Math.sin(gait)) * 0.17 * size;
       const x = here.x + nx * side;
-      // 裾の縁は少し切り落としてあるので、そのぶんマントを道へ埋める。
-      // 埋めないと、下端と道のあいだに隙間が空いて宙に浮く
-      const y = here.y + bob - 0.06 * size;
+      // 裾の波は下向きにも出るので、埋めるのはごくわずかでよい。
+      // 深く埋めると、波の谷が道に飲まれて裾がまっすぐに見える
+      const y = here.y + bob - 0.02 * size;
       const z = here.z + nz * side;
       const yaw = Math.atan2(tx, tz);
       const lean = -0.05 - Math.sin(gait * 2) * 0.045;
       const roll = Math.sin(gait) * 0.12 * hand;
 
-      // マント。丈と太さを別々に掛けるので、痩せた背高と低い横広が混ざる
+      // シーツ。丈と太さを別々に掛けるので、痩せた背高と低い横広が混ざる
       dummy.position.set(x, y, z);
       dummy.rotation.set(
         lean, // 前のめりに、一歩ごとに頷く
@@ -946,18 +949,18 @@ export const nightParade: SceneModule = {
       dummy.updateMatrix();
       bodies.setMatrixAt(i, dummy.matrix);
 
-      // マントは闇に近い色。個体ごとのオフセットに、歩調ぶんの明暗を足す。
-      // ここを上げると黒衣ではなく「赤い服」に見え始める。
+      // シーツは闇に近い色。個体ごとのオフセットに、歩調ぶんの明暗を足す。
+      // ここを上げると暗がりの布ではなく「赤い布」に見え始める。
       // 面の色は沈めておいて、明るみは人魂の灯りだけに作らせるほうがよい
       ember(color, 0.11 + oni[o + 8]! * 0.6 + 0.05 * (0.5 + 0.5 * Math.sin(gait)), hue);
       bodies.setColorAt(i, color);
 
-      // 平笠。マントの行列をそのまま使って、首の位置を世界へ持ち上げる。
-      // 首はシェーダの中で振れているので、同じ式でずらしてから変換する。
-      // 位置だけ別に組み立てると、歩くたびに笠が首から外れて宙に残る
+      // 平笠。シーツの行列をそのまま使って、頭の位置を世界へ持ち上げる。
+      // 頭はシェーダの中で振れているので、同じ式でずらしてから変換する。
+      // 位置だけ別に組み立てると、歩くたびに笠が頭から外れて宙に残る
       perch.set(
         SWAY_X * Math.sin(t * oni[o + 3]! * 0.33 + oni[o + 4]!),
-        CLOAK_H * HAT_AT,
+        SHEET_H * HAT_AT,
         SWAY_Z * Math.sin(t * oni[o + 3]! * 0.27 + oni[o + 4]! * 1.7 + 1.1),
       );
       perch.applyMatrix4(dummy.matrix);
@@ -968,13 +971,13 @@ export const nightParade: SceneModule = {
       dummy.updateMatrix();
       hats.setMatrixAt(i, dummy.matrix);
 
-      // 笠はマントより明るく。黒衣の上に載る唯一の明るい面なので、
+      // 笠はシーツより明るく。暗い布の上に載る唯一の明るい面なので、
       // ここで差を付けないと、人影ではなく縦に伸びた霞の塊にしか見えない
       ember(color, 0.24 + oni[o + 8]! * 0.5, hue);
       hats.setColorAt(i, color);
 
-      // 塵。マントの面の少し外側を巡りながら、裾から湧いて首の高さで消える。
-      // 位置はマントの輪郭（cloakRadius）から取っているので、痩せた個体には塵も細く付く
+      // 塵。シーツの面の少し外側を巡りながら、裾から湧いて頭の高さで消える。
+      // 位置はシーツの輪郭（sheetRadius）から取っているので、小柄な個体には塵も細く付く
       const cy = Math.cos(yaw);
       const sy = Math.sin(yaw);
       for (let m = 0; m < DUST_PER; m++) {
@@ -983,11 +986,11 @@ export const nightParade: SceneModule = {
         const h = (dust[d + 1]! + t * dust[d + 2]!) % 1;
         const a = dust[d]! + t * 0.22;
         // 面のすぐ外側。息をするように離れたり寄ったりする
-        const rr = cloakRadius(h) * wide * size * (1.2 + 0.34 * Math.sin(t * 0.8 + dust[d]!));
+        const rr = sheetRadius(h) * wide * size * (1.2 + 0.34 * Math.sin(t * 0.8 + dust[d]!));
         const lx = Math.cos(a) * rr;
         const lz = Math.sin(a) * rr;
         const g = i * DUST_PER + m;
-        mpos.setXYZ(g, x + lx * cy + lz * sy, y + h * CLOAK_H * size, z - lx * sy + lz * cy);
+        mpos.setXYZ(g, x + lx * cy + lz * sy, y + h * SHEET_H * size, z - lx * sy + lz * cy);
 
         // 湧き際と消え際を絞る。いきなり現れて消えると、粒が点滅しているように見える
         const f = smoothstep(0, 0.12, h) * (1 - smoothstep(0.5, 1, h));
