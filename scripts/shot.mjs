@@ -45,6 +45,13 @@ const ROOT = dirname(git('rev-parse', '--path-format=absolute', '--git-common-di
 const HERE = git('rev-parse', '--show-toplevel');
 const STATE_DIR = join(ROOT, '.claude', '.play');
 
+/**
+ * 画像は「実行した作業ツリーの中」へ置く。dev サーバーの記録（STATE_DIR）と違って
+ * 1 か所に集める必要が無く、worktree の外に出すとセッションから読めないことがあるため。
+ * リポジトリ本体で実行したときは HERE === ROOT なので、置き場所は従来どおり。
+ */
+const SHOT_DIR = join(HERE, '.claude', '.play', 'shots');
+
 /** play.mjs が使っているキー。リポジトリ本体なら 'main'、worktree ならその名前。 */
 const KEY = HERE === ROOT ? 'main' : basename(HERE);
 
@@ -61,7 +68,7 @@ if (argv.length === 0 || argv.includes('--help') || argv.includes('-h')) {
 オプション:
   --wait <ms>          撮る前に待つ時間（既定 1500。カメラの補間が落ち着くまで）
   --viewport <WxH>     ビューポート（既定 960x600。大きくすると読み込む画像も重くなる）
-  --out <path>         保存先（既定 .claude/.play/shots/<key>-<scene>.png）
+  --out <path>         保存先（既定 <実行した作業ツリー>/.claude/.play/shots/<key>-<scene>.png）
   --keep-errors        ページ内エラーがあっても終了コードを 0 にする`);
   process.exit(0);
 }
@@ -214,7 +221,7 @@ if (n === 0) {
 const state = ensureServer();
 const url = `${state.url.replace(/\/$/, '')}/#${n}`;
 
-const outPath = flag('--out', null) || join(STATE_DIR, 'shots', `${KEY}-${SCENE}.png`);
+const outPath = flag('--out', null) || join(SHOT_DIR, `${KEY}-${SCENE}.png`);
 mkdirSync(dirname(outPath), { recursive: true });
 
 // 開く前の状態を控えておく。あとで差分だけを「このシーンが出したエラー」とみなす。
