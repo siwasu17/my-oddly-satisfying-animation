@@ -6,51 +6,59 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
 /**
  * Fluff Belt。
  *
- * やや高めの斜め横から見た、3 段組みのベルトコンベア。平たいクッションが
- * 最上段の入口へふわりと降りてきて着地し、潰れて戻りながら一定速度で流れる。
- * 段の終点を越えると放物線を描いて 1 つ下の段へ落ち、そこは逆向きに流れている
- * ので折り返す。3 段を蛇行して下りきると、最後は右の箱へ落ちて暗がりへ沈む。
+ * 高さの違う 3 本のベルトコンベアを、平面で見て「コ」の字に組んだ搬送路。
+ * 最上段は右から左へ、中段は奥から手前へ、最下段は左から右へ流れる。
+ * 段が変わるたびに進行方向が 90 度折れるので、どこを運ばれているのかが
+ * 一目で追えて、同時に 3 本が奥行きの違う位置に並ぶ。
  *
- * 段ごとに x を互い違いにずらし、さらに 1 段ごとに手前へ寄せてあるので、
- * 斜めから見たときに 3 本のベルトが重ならず、奥行きのある足場として読める。
+ * 平たいクッションが最上段の入口へふわりと降りてきて着地し、潰れて戻り
+ * ながら一定速度で流れる。終点を越えるとそのままの向きに放り出され、
+ * 放物線を描いて 1 つ下の段へ落ちる。落ちながら次の段の向きへ body を
+ * 回し、着地でまた潰れる。3 段下りきると最後は箱へ落ちて暗がりへ沈む。
+ *
  * ベルトは無端ループとして作ってあり、桟は上面を進んだあとローラーの曲面を
  * 回り込んで裏側を戻ってくる。ローラーの回転もベルト速度に同期している。
  *
- * 気持ちよさの芯は「着地でぷにっと潰れて戻る」反復と、段を折り返して下りていく
- * 見通しの良さ。落下は重力加速だけで決めてあるので、着地点は必ず次の段に乗る。
+ * 気持ちよさの芯は「着地でぷにっと潰れて戻る」反復と、コの字を折り返しながら
+ * 下りていく見通しの良さ。落下は重力加速だけで決めてあるので、着地点は必ず
+ * 次の段に乗る。
  */
 
 // ---- ベルト 1 本ぶんの寸法 ----
 /** ローラー中心までの距離（ベルトの直線部の半分） */
-const BELT_HALF = 7;
+const BELT_HALF = 6;
 /** ローラーの半径。大きく露出させるほど「回っている機械」に見える */
 const ROLLER_R = 1.1;
-/** ベルトの幅（奥行き） */
+/** ベルトの幅 */
 const BELT_W = 3.4;
 /** ベルトが流れる速さ（単位/秒） */
 const BELT_SPEED = 2.37;
 /** ベルト 1 本あたりの桟の数。細かく並べると網に見えるので粗くしてある */
-const CLEAT_N = 18;
+const CLEAT_N = 16;
 
 // ---- 段の積み方 ----
-/** 段の数 */
-const TIERS_N = 3;
+/**
+ * 段ごとの進行方向（x, z）。平面で見て「コ」の字を描く。
+ * カメラは +z 側（手前）から見ているので、+z が手前、-z が奥。
+ */
+const DIRS: readonly (readonly [number, number])[] = [
+  [-1, 0], // 最上段: 右から左へ
+  [0, 1], //  中段: 奥から手前へ
+  [1, 0], //  最下段: 左から右へ
+];
+const TIERS_N = DIRS.length;
 /** 最下段のローラー中心の高さ */
 const BASE_Y = 2.6;
 /** 段どうしの高低差。クッションの落差そのもの */
 const TIER_GAP = 3.6;
-/** 段を 1 つ下るごとに手前へずらす量。斜めから見て重ならないようにする */
-const TIER_DZ = 1.2;
 /** 落下の重力。弱いほど放物線が伸び、ふわふわした落ち方になる */
 const GRAV = 5.5;
-/** 落下にかかる時間。TIER_GAP をちょうど落ちきる長さ */
+/** 段から段への落下にかかる時間。TIER_GAP をちょうど落ちきる長さ */
 const FALL_T = Math.sqrt((2 * TIER_GAP) / GRAV);
-/** 落下で進む水平距離 */
+/** その間に進む水平距離。次の段はこれだけ先に置く */
 const FALL_DX = BELT_SPEED * FALL_T;
 /** 次の段の端から、どれだけ内側に着地させるか */
 const LAND_MARGIN = 0.9;
-/** 段どうしの x のずれ。これだけずらすと落下の着地点が次の段に乗る */
-const TIER_DX = FALL_DX + LAND_MARGIN;
 
 // ---- クッション ----
 /** 同時に流れているクッションの数 */
@@ -65,71 +73,139 @@ const CUSHION_ROUND = 0.42;
 const DROP_IN_H = 2.6;
 const DROP_IN_T = 1;
 
+/** 最下段でクッションが乗っている高さ */
+const BOTTOM_RIDE_Y = BASE_Y + ROLLER_R + CUSHION_H / 2;
+/** 箱に届くまでの落下時間。底の少し上まで落ちたら沈めて消す */
+const BOX_FALL_T = Math.sqrt((2 * (BOTTOM_RIDE_Y - 1)) / GRAV);
+const BOX_SIZE = 4.4;
+const BOX_H = 2.2;
+
 /** 1 段ぶんの諸元。ベルトの向き・位置と、その段に乗っている時間。 */
 interface Tier {
-  /** ベルトが流れる向き（+1 / -1）。段ごとに反転する */
-  dir: number;
+  /** 進行方向（単位ベクトル） */
+  dx: number;
+  dz: number;
+  /** その向きへ向けるための Y 回転 */
+  ry: number;
+  /** 次の段へ向き直るときの回転量（最下段は 0） */
+  turn: number;
   /** ベルト中心の座標（高さはローラー中心） */
   cx: number;
   cy: number;
   cz: number;
   /** ベルトに乗っているクッション中心の高さ */
   rideY: number;
-  /** 乗り始め・降り際の x */
+  /** 乗り始め・降り際の平面座標 */
   entryX: number;
+  entryZ: number;
   exitX: number;
+  exitZ: number;
   /** ライフサイクル中、この段に乗っている区間（秒） */
   start: number;
   end: number;
+  /** その段で鳴らす音の定位 */
+  pan: number;
+}
+
+/** -PI..PI に畳んだ角度差。段をまたぐときの回転を最短で回すのに使う。 */
+function wrapPi(a: number): number {
+  return a - Math.PI * 2 * Math.round(a / (Math.PI * 2));
 }
 
 /**
- * 段の諸元を組み立てる。
+ * コの字の搬送路を組み立てる。
  *
- * 上の段の終点から放物線で落ちた着地点が、そのまま次の段の乗り始めになる。
- * x のずらし幅（TIER_DX）は落下距離から決めてあるので、段を互い違いに
- * 並べるだけで乗り継ぎが成立する。
+ * 各段は「前の段の終点から、その段の向きへ FALL_DX だけ放り出された点」に
+ * 着地するように置く。落下は前の段の進行方向をそのまま延長するだけなので、
+ * 段の向きが 90 度折れても着地点の計算は 1 本の式で済む。
+ * 最後に全体を原点まわりへ寄せて、カメラの真ん中に収まるようにする。
  */
-function buildTiers(): Tier[] {
-  const list: Tier[] = [];
+function buildTiers(): { tiers: Tier[]; boxX: number; boxZ: number } {
+  const tiers: Tier[] = [];
+  // 「クッションが乗り始める点」を段から段へ引き継いでいく
+  let ex = 0;
+  let ez = 0;
   let clock = 0;
+
   for (let k = 0; k < TIERS_N; k++) {
-    const dir = k % 2 === 0 ? 1 : -1;
-    const cx = (-dir * TIER_DX) / 2;
+    const [dx, dz] = DIRS[k]!;
+    // 2 段目以降は端より内側に着地するので、ベルトの始端はその分だけ手前
+    const margin = k === 0 ? 0 : LAND_MARGIN;
+    const sx = ex - dx * margin;
+    const sz = ez - dz * margin;
+    const exitX = sx + dx * 2 * BELT_HALF;
+    const exitZ = sz + dz * 2 * BELT_HALF;
     const cy = BASE_Y + (TIERS_N - 1 - k) * TIER_GAP;
-    const cz = (k - (TIERS_N - 1) / 2) * TIER_DZ;
-    const prev = list[k - 1];
-    // 初段だけは端から、以降は前の段から落ちてきた着地点から乗る
-    const entryX = prev ? prev.exitX + prev.dir * FALL_DX : cx - dir * BELT_HALF;
-    const exitX = cx + dir * BELT_HALF;
     const start = clock;
-    clock += Math.abs(exitX - entryX) / BELT_SPEED;
-    list.push({
-      dir,
-      cx,
+    clock += (2 * BELT_HALF - margin) / BELT_SPEED;
+
+    tiers.push({
+      dx,
+      dz,
+      // ローカルの +X をこの向きへ倒す角度
+      ry: Math.atan2(-dz, dx),
+      turn: 0,
+      cx: sx + dx * BELT_HALF,
       cy,
-      cz,
+      cz: sz + dz * BELT_HALF,
       rideY: cy + ROLLER_R + CUSHION_H / 2,
-      entryX,
+      entryX: ex,
+      entryZ: ez,
       exitX,
+      exitZ,
       start,
       end: clock,
+      pan: 0,
     });
+
     if (k < TIERS_N - 1) clock += FALL_T;
+    ex = exitX + dx * FALL_DX;
+    ez = exitZ + dz * FALL_DX;
   }
-  return list;
+
+  // 最下段を出たあとは箱へ。落下時間が段間とは違うので別に出す
+  const last = tiers[TIERS_N - 1]!;
+  let boxX = last.exitX + last.dx * BELT_SPEED * BOX_FALL_T;
+  let boxZ = last.exitZ + last.dz * BELT_SPEED * BOX_FALL_T;
+
+  // 全体の外接矩形を測って原点へ寄せる
+  let minX = boxX - BOX_SIZE / 2;
+  let maxX = boxX + BOX_SIZE / 2;
+  let minZ = boxZ - BOX_SIZE / 2;
+  let maxZ = boxZ + BOX_SIZE / 2;
+  for (const t of tiers) {
+    const halfX = Math.abs(t.dx) * (BELT_HALF + ROLLER_R) + Math.abs(t.dz) * (BELT_W / 2);
+    const halfZ = Math.abs(t.dz) * (BELT_HALF + ROLLER_R) + Math.abs(t.dx) * (BELT_W / 2);
+    minX = Math.min(minX, t.cx - halfX);
+    maxX = Math.max(maxX, t.cx + halfX);
+    minZ = Math.min(minZ, t.cz - halfZ);
+    maxZ = Math.max(maxZ, t.cz + halfZ);
+  }
+  const ox = -(minX + maxX) / 2;
+  const oz = -(minZ + maxZ) / 2;
+  for (const t of tiers) {
+    t.cx += ox;
+    t.cz += oz;
+    t.entryX += ox;
+    t.entryZ += oz;
+    t.exitX += ox;
+    t.exitZ += oz;
+    // 定位は段の中心の左右で決める
+    t.pan = Math.max(-1, Math.min(1, t.cx / (maxX + ox))) * 0.4;
+  }
+  boxX += ox;
+  boxZ += oz;
+
+  // 落下中に次の段の向きへ回り込むための角度
+  for (let k = 0; k < TIERS_N - 1; k++) {
+    tiers[k]!.turn = wrapPi(tiers[k + 1]!.ry - tiers[k]!.ry);
+  }
+
+  return { tiers, boxX, boxZ };
 }
 
-const TIERS = buildTiers();
+const { tiers: TIERS, boxX: BOX_X, boxZ: BOX_Z } = buildTiers();
 const LAST = TIERS[TIERS_N - 1]!;
-
-// ---- 受け箱 ----
-/** 箱に届くまでの落下時間。底の少し上まで落ちたら沈めて消す */
-const BOX_FALL_T = Math.sqrt((2 * (LAST.rideY - 1)) / GRAV);
-const BOX_X = LAST.exitX + LAST.dir * BELT_SPEED * BOX_FALL_T;
-const BOX_Z = LAST.cz;
-const BOX_SIZE = 4.4;
-const BOX_H = 2.2;
 
 /** 1 個分のライフサイクル（秒）。最後の落下と沈み込みまで含める */
 const CYCLE = LAST.end + BOX_FALL_T + 0.45;
@@ -213,13 +289,13 @@ interface BeltMats {
 
 /**
  * 段 1 本ぶんのベルト。原点をローラー中心に置いたローカル系で組み、
- * 逆向きの段はグループごと Y 180 度で裏返す（ベルトは前後対称）。
- * こうしておくと桟とローラーの計算が 3 段とも同じ式で済む。
+ * グループごと Y 回転で進行方向へ倒す。こうしておくと桟とローラーの
+ * 計算が 3 段とも同じ式で済む。
  */
 function buildTier(tier: Tier, cleatGeo: THREE.BufferGeometry, mats: BeltMats): THREE.Group {
   const g = new THREE.Group();
   g.position.set(tier.cx, tier.cy, tier.cz);
-  if (tier.dir < 0) g.rotation.y = Math.PI;
+  g.rotation.y = tier.ry;
 
   // ベルトの中身。桟の隙間から向こう側が抜けないように詰めておく
   const core = new THREE.Mesh(
@@ -237,7 +313,7 @@ function buildTier(tier: Tier, cleatGeo: THREE.BufferGeometry, mats: BeltMats): 
     rollers.push(r);
   }
 
-  // 両脇のフレーム
+  // 両脇のフレーム。脚は付けない（段が空中に浮いているほうが経路が読める）
   for (const sz of [-1, 1]) {
     const rail = new THREE.Mesh(
       new THREE.BoxGeometry(2 * (BELT_HALF + ROLLER_R), 0.16, 0.16),
@@ -252,43 +328,6 @@ function buildTier(tier: Tier, cleatGeo: THREE.BufferGeometry, mats: BeltMats): 
   g.add(cleats);
   tierCleats.push(cleats);
 
-  return g;
-}
-
-/** 支柱を立てる奥行き。いちばん奥のフレームよりさらに奥 */
-const BACK_Z = -(TIERS_N - 1) * 0.5 * TIER_DZ - BELT_W / 2 - 1;
-
-/**
- * 段を支える柱。
- *
- * 段の真下に脚を下ろすと、下の段のベルトを突き抜けてしまう（3 段は x で
- * 大きく重なっている）。そこで柱はすべて奥の 1 面へ寄せ、そこから腕を
- * 伸ばして各段を吊る形にした。手前が空くのでクッションの輪郭も汚れない。
- */
-function buildSupports(mat: THREE.Material): THREE.Group {
-  const g = new THREE.Group();
-  for (let k = 0; k < TIERS_N; k++) {
-    const tier = TIERS[k]!;
-    // 上下の段は x が揃うので、柱が重ならないよう段ごとに少しずらす
-    const nudge = (k - (TIERS_N - 1) / 2) * 0.5;
-    const armEnd = tier.cz - BELT_W / 2 - 0.2;
-    for (const sx of [-1, 1]) {
-      const x = tier.cx + nudge + sx * (BELT_HALF - 1.1);
-      const post = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.12, 0.12, tier.cy, 8),
-        mat,
-      );
-      post.position.set(x, tier.cy / 2, BACK_Z);
-      g.add(post);
-
-      const arm = new THREE.Mesh(
-        new THREE.BoxGeometry(0.14, 0.14, armEnd - BACK_Z),
-        mat,
-      );
-      arm.position.set(x, tier.cy, (armEnd + BACK_Z) / 2);
-      g.add(arm);
-    }
-  }
   return g;
 }
 
@@ -321,8 +360,8 @@ function buildBox(): THREE.Group {
 
 export const fluffBelt: SceneModule = {
   name: 'Fluff Belt',
-  desc: 'ふわふわのクッションが 3 段のベルトを折り返しながら下り、箱へ落ちていく。',
-  camera: { pos: [10, 14, 23], target: [0.5, 6.4, 0] },
+  desc: 'ふわふわのクッションがコの字に組んだ 3 段のベルトを下り、箱へ落ちていく。',
+  camera: { pos: [13, 19.5, 19.5], target: [0, 6, 0] },
 
   build(root) {
     tierCleats = [];
@@ -343,7 +382,7 @@ export const fluffBelt: SceneModule = {
     cleatGeo.translate(0, 0.045, 0);
 
     const mats: BeltMats = {
-      // フレームと脚は暗く細く。本体の下を横切るので、目立たせるとシルエットを汚す
+      // フレームは暗く細く。目立たせるとクッションのシルエットを汚す
       frame: new THREE.MeshStandardMaterial({
         color: emberColor(0.08, 0, -0.02),
         roughness: 0.6,
@@ -369,7 +408,6 @@ export const fluffBelt: SceneModule = {
     };
 
     for (const tier of TIERS) root.add(buildTier(tier, cleatGeo, mats));
-    root.add(buildSupports(mats.frame));
 
     cushions = new THREE.InstancedMesh(
       cushionGeometry(),
@@ -382,7 +420,7 @@ export const fluffBelt: SceneModule = {
     root.add(buildBox());
 
     const floor = new THREE.Mesh(
-      new THREE.CircleGeometry(28, 96),
+      new THREE.CircleGeometry(30, 96),
       // 磨きすぎるとライトの反射が床で光柱になり、主役より明るくなる
       new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.58, metalness: 0.45 }),
     );
@@ -421,6 +459,7 @@ export const fluffBelt: SceneModule = {
       let x: number;
       let y: number;
       let z: number;
+      let yaw = tier.ry;
       let visible = 1;
       let tumble = 0;
       // 着地してからの経過秒。負の値は「まだベルトに乗っていない」
@@ -429,9 +468,9 @@ export const fluffBelt: SceneModule = {
       if (age < tier.end) {
         // ベルトに乗って等速で流れている
         const run = age - tier.start;
-        x = tier.entryX + tier.dir * BELT_SPEED * run;
+        x = tier.entryX + tier.dx * BELT_SPEED * run;
+        z = tier.entryZ + tier.dz * BELT_SPEED * run;
         y = tier.rideY;
-        z = tier.cz;
         since = run;
         if (k === 0 && run < DROP_IN_T) {
           // 最上段の入口だけは、上空からふわりと降りてくる
@@ -442,17 +481,16 @@ export const fluffBelt: SceneModule = {
       } else {
         // 段を離れて落下中。水平速度はベルト速度のまま、鉛直だけ加速する
         const u = age - tier.end;
-        const next = TIERS[k + 1];
-        x = tier.exitX + tier.dir * BELT_SPEED * u;
+        x = tier.exitX + tier.dx * BELT_SPEED * u;
+        z = tier.exitZ + tier.dz * BELT_SPEED * u;
         y = tier.rideY - 0.5 * GRAV * u * u;
-        tumble = tier.dir * u * 0.3;
+        tumble = u * 0.3;
         since = -1;
-        if (next) {
-          // 次の段は手前にずれているので、落ちながら奥行きも移す
+        if (k < TIERS_N - 1) {
+          // 落ちながら次の段の向きへ回り込む
           const e = u / FALL_T;
-          z = tier.cz + (next.cz - tier.cz) * e * e * (3 - 2 * e);
+          yaw += tier.turn * e * e * (3 - 2 * e);
         } else {
-          z = tier.cz;
           // 箱の暗がりへ沈むように、着地の直前から縮めて消す
           visible = 1 - Math.max(0, (u - BOX_FALL_T * 0.86) / (BOX_FALL_T * 0.3));
         }
@@ -472,8 +510,9 @@ export const fluffBelt: SceneModule = {
       const sxz = (1 + flat * 0.2 - breath * 0.5) * fade;
 
       dummy.position.set(x, y + hover - flat * CUSHION_H * 0.2, z);
+      // YXZ なので Z 回転は「進行方向を向いたあとの前後の傾き」になる
       dummy.rotation.order = 'YXZ';
-      dummy.rotation.set(0, yaws[i]!, sway + tumble);
+      dummy.rotation.set(0, yaw + yaws[i]!, sway + tumble);
       dummy.scale.set(CUSHION_W * sxz, CUSHION_H * sy, CUSHION_D * sxz);
       dummy.updateMatrix();
       cushions.setMatrixAt(i, dummy.matrix);
@@ -495,10 +534,10 @@ export const fluffBelt: SceneModule = {
       const ph = t / CYCLE + i / COUNT;
       for (let k = 0; k < TIERS_N; k++) {
         const tier = TIERS[k]!;
-        // 段ごとの着地。下の段ほど低く、定位も流れる向きに合わせる
+        // 段ごとの着地。下の段ほど低く、定位はその段がいる左右に合わせる
         const at = (tier.start + (k === 0 ? DROP_IN_T : 0)) / CYCLE;
         for (let n = landTicks[k]![i]!(ph - at); n > 0; n--) {
-          sfx.air({ gain: 0.1, freq: 720 - k * 130, decay: 0.55, pan: tier.dir * -0.35 });
+          sfx.air({ gain: 0.1, freq: 720 - k * 130, decay: 0.55, pan: tier.pan });
         }
       }
       for (let n = dropTicks[i]!(ph - hit); n > 0; n--) {
