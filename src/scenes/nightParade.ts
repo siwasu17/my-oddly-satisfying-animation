@@ -22,6 +22,20 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
  * 裾と胴の破れはフラグメントの discard で開けているので、輪郭そのものが
  * ぎざぎざに欠ける。両面を描いて、破れ目から袋の内側が覗くようにしてある。
  *
+ * ただし「そこに在る物」としては描かない。物として立たせると、行列が
+ * 夜道を歩いてくる絵が生々しくなりすぎて、寝る前に眺めるものではなくなる。
+ * 実在感を作っているのは (1) 不透明な面 (2) プラスチックの照り (3) 硬い輪郭線
+ * の 3 つなので、その 3 つを順に抜いてある。
+ *   (1) 面は透明にし、深度も書かない。視線に対して正面を向いた面をほとんど
+ *       透かし、縁だけを残す（フレネル）ので、膜の縁取りしか見えない。
+ *       前後の袋が互いに透け、1 体の表と裏も重なって内側がほのかに濁る。
+ *   (2) 粗さを 0.97 まで上げて照りを消した。
+ *   (3) 破れの切り口は硬いまま残さず、消える手前をなだらかに溶かす。
+ *       そのうえで袋 1 体につき 22 粒の塵をまとわせ、輪郭の線を粒で食わせる。
+ *       塵は袋の面の少し外側を巡りながら裾から湧いて、口の高さで消える。
+ *       粒は袋の丈の 4 割もある大きさで、1 粒では形が分からないほど薄い。
+ *       小さく硬い粒にすると、霞ではなく蛍の群れになってしまう。
+ *
  * 「環の全周を見せる」と「一体のかたちを読ませる」は画角の上で両立しない。
  * この fov（48°）と環の半径（12±4.4）では、全周を入れると一体は 20〜40px にしかならず、
  * 破れも皺も輪郭としては潰れる。ここでは全周のほうを取った。
@@ -107,6 +121,22 @@ const GATE = 0.0375;
 const SOUND_EVERY = 4;
 
 /**
+ * 妖怪 1 体にまとわりつく塵の数。
+ * 袋の面を透かしただけでは、輪郭の線がくっきり残って切り抜きに見える。
+ * その線の上へ粒を散らして、縁が霧に食われているように見せる。
+ */
+const DUST_PER = 22;
+/**
+ * 塵 1 粒の大きさ。
+ * 袋の丈（2.3）の 4 割もある。小さくすると 1 粒 1 粒が点として見え、
+ * 霞ではなく蛍の群れになってしまう。輪郭が分からないほど大きく引き伸ばし、
+ * そのぶん 1 粒を十分に暗くして、重なったところだけが濁るようにする。
+ */
+const DUST_SIZE = 0.95;
+/** 塵 1 粒が持つ値の数。[周りを巡る角度, 湧き始める高さ, のぼる速さ] */
+const DUST_STRIDE = 3;
+
+/**
  * 妖怪ごとに持つ値の数。
  * [道の位置, 道幅方向のずれ, 背丈, 歩調, 位相, 横幅の倍率, 揺れる向き, 型, 袋の明度]
  */
@@ -125,38 +155,64 @@ const wisp = new THREE.Vector3();
 
 const oni = new Float32Array(COUNT * STRIDE);
 const soul = new Float32Array(SOULS * SOUL_STRIDE);
+const dust = new Float32Array(COUNT * DUST_PER * DUST_STRIDE);
 
 let bodies: THREE.InstancedMesh;
+let motes: THREE.Points;
 let cores: THREE.Points;
 let souls: THREE.Points;
 let lamps: THREE.PointLight[] = [];
 
 /**
- * 人魂の粒に貼る、中心が白く縁へ向かって消えていく丸。
+ * 粒に貼る、中心から縁へ向かって消えていく丸。
  * PointsMaterial は map を与えないと四角い点になるので、丸さはここで作る。
  * disposeGroup() はテクスチャまでは破棄しないため、build のたびに作らず
- * モジュールに 1 枚だけ持たせて使い回す。
+ * モジュールに持たせて使い回す。
  */
-let sprite: THREE.CanvasTexture | null = null;
+const sprites = new Map<string, THREE.CanvasTexture>();
 
-function wispSprite(): THREE.CanvasTexture {
-  if (sprite) return sprite;
+function radialSprite(key: string, stops: [number, number][]): THREE.CanvasTexture {
+  const found = sprites.get(key);
+  if (found) return found;
   const size = 64;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d')!;
   const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-  // 中心の減衰を急にすると、粒の「見えている芯」が点の大きさより遥かに小さくなり、
-  // 粒を並べても連続した筋にならず破線に見える。手前をなだらかに保つ
-  g.addColorStop(0, 'rgba(255,255,255,1)');
-  g.addColorStop(0.5, 'rgba(255,255,255,0.55)');
-  g.addColorStop(1, 'rgba(255,255,255,0)');
+  for (const [at, alpha] of stops) g.addColorStop(at, `rgba(255,255,255,${alpha})`);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, size, size);
-  sprite = new THREE.CanvasTexture(canvas);
-  return sprite;
+  const tex = new THREE.CanvasTexture(canvas);
+  sprites.set(key, tex);
+  return tex;
 }
+
+/**
+ * 人魂の粒。
+ * 中心の減衰を急にすると、粒の「見えている芯」が点の大きさより遥かに小さくなり、
+ * 粒を並べても連続した筋にならず破線に見える。手前をなだらかに保つ。
+ */
+const wispSprite = (): THREE.CanvasTexture =>
+  radialSprite('wisp', [
+    [0, 1],
+    [0.5, 0.55],
+    [1, 0],
+  ]);
+
+/**
+ * 塵の粒。
+ * 人魂と同じ描き方をすると、芯がはっきりして蛍の群れに見えてしまう。
+ * 中心をあらかじめ薄くし、そこから長く尾を引かせて、
+ * 1 粒だけでは「どこからどこまでが粒か」が分からない霞にしておく。
+ */
+const hazeSprite = (): THREE.CanvasTexture =>
+  radialSprite('haze', [
+    [0, 0.5],
+    [0.3, 0.3],
+    [0.65, 0.09],
+    [1, 0],
+  ]);
 
 /** 一体ごとに、鳥居をくぐった回数を数える */
 let ticks = tickers(COUNT);
@@ -341,12 +397,16 @@ const bagTime = { value: 0 };
  */
 function bagMaterial(): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({
-    // つるつるに寄せると、通り過ぎる人魂の灯りが皺の上を滑る。
-    // ゴミ袋らしさはこの「安っぽい照り」でほぼ決まる
-    roughness: 0.58,
-    metalness: 0.06,
+    // 照りを消す。つるつるに寄せると人魂の灯りが皺の上を滑って
+    // 「そこに在る物」になってしまう。ここでは物として立たせたくない
+    roughness: 0.97,
+    metalness: 0,
     // 破れ目から袋の内側が見えるので、裏面も描く
     side: THREE.DoubleSide,
+    // 薄い膜として重ねる。深度を書かないので、前後の袋が互いに透けて、
+    // 表と裏がひとりでに重なって内側がほのかに濁る
+    transparent: true,
+    depthWrite: false,
   });
 
   /**
@@ -398,7 +458,7 @@ function bagMaterial(): THREE.MeshStandardMaterial {
             + 0.17 * sin(a * 2.0 + k * 3.1 + aSeed)
             + 0.11 * sin(a * 3.0 - k * 5.0 + aSeed * 2.3)
             + 0.045 * sin(a * 7.0 + aSeed * 1.9)
-            + 0.030 * sin(a * 15.0 + k * 9.0 + aSeed * 4.1);
+            + 0.018 * sin(a * 15.0 + k * 9.0 + aSeed * 4.1);
 
           // 歩くたびに中身が揺れて、裾のほうが膨れたり凹んだりする
           float low = 1.0 - k;
@@ -443,6 +503,8 @@ function bagMaterial(): THREE.MeshStandardMaterial {
         '#include <clipping_planes_fragment>',
         /* glsl */ `
         #include <clipping_planes_fragment>
+        // 破れの縁の溶け具合。下で計算して、いちばん最後の合成で透明度に掛ける
+        float tatterA = 1.0;
         {
           float a = vBag.x;
           float h = vBag.y;
@@ -459,12 +521,29 @@ function bagMaterial(): THREE.MeshStandardMaterial {
           // 深い裂け目が数本あると「破れて垂れ下がった袋」に読める
           hem += pow(0.5 + 0.5 * sin(a * 3.0 + sd * 2.0), 7.0) * 0.34;
           if (h < hem) discard;
+          // 切り口をそのまま残すと縁が硬くて「破れた物」に見える。
+          // 消える手前をなだらかにして、裾が霧へ溶けていくようにする
+          tatterA *= smoothstep(hem, hem + 0.10, h);
 
           // 胴の穴。角度と高さの積を閾値で切ると、まばらな染みのように開く
           float hole = sin(a * 2.0 + sd * 4.7) * sin(h * 5.5 - sd * 2.9)
                      + 0.35 * sin(a * 5.0 - h * 9.0 + sd);
           if (hole > 1.04) discard;
+          tatterA *= 1.0 - smoothstep(0.80, 1.04, hole);
         }
+      `,
+      )
+      .replace(
+        '#include <opaque_fragment>',
+        /* glsl */ `
+        {
+          // 面をまっすぐ向いているところをほとんど透かし、
+          // 視線と平行になる縁だけを残す。膜の縁取りだけが見えている状態になり、
+          // 塊としての実在感が抜ける
+          float fres = 1.0 - abs(dot(normalize(normal), normalize(vViewPosition)));
+          diffuseColor.a *= tatterA * mix(0.13, 0.44, pow(fres, 1.2));
+        }
+        #include <opaque_fragment>
       `,
       );
   };
@@ -578,10 +657,10 @@ function buildGate(): THREE.Group {
   return gate;
 }
 
-/** 破れたゴミ袋のような妖怪の行列が、うねる夜道をどこまでも巡っていく。 */
+/** 霞にほどけかけたボロ袋の行列が、うねる夜道をどこまでも巡っていく。 */
 export const nightParade: SceneModule = {
   name: 'Night Parade',
-  desc: '闇の環を練り歩くボロ袋の行列に、人魂が尾を引いて寄り添い漂う。',
+  desc: '闇の環を練り歩く朧げなボロ袋の行列に、人魂が尾を引いて寄り添い漂う。',
   // 俯瞰しすぎると鳥居が潰れるので、環が見える高さぎりぎりまで下げている
   camera: { pos: [0, 15, 30], target: [0, 1.2, 0] },
 
@@ -650,6 +729,14 @@ export const nightParade: SceneModule = {
       soul[o + 5] = 0.5 + rnd() * 0.5;
     }
 
+    for (let m = 0; m < COUNT * DUST_PER; m++) {
+      const o = m * DUST_STRIDE;
+      dust[o] = rnd() * TAU;
+      dust[o + 1] = rnd();
+      // のぼる速さを粒ごとに変える。揃えると層になって上がり、煙ではなく帯に見える
+      dust[o + 2] = 0.035 + rnd() * 0.075;
+    }
+
     // 袋。形は頂点シェーダが作るので、ここでは骨格と個体ごとの値だけ渡す
     const bag = buildBag();
     bag.setAttribute('aPhase', new THREE.InstancedBufferAttribute(phase, 1));
@@ -667,7 +754,7 @@ export const nightParade: SceneModule = {
 
     // 人魂。粒は光そのものなので加算合成で重ね、深度も書かない。
     // 尾が重なったところが自然に明るくなり、ブルームがそこを芯として拾う
-    const wispPoints = (count: number, size: number): THREE.Points => {
+    const wispPoints = (count: number, size: number, tex: THREE.CanvasTexture): THREE.Points => {
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
       geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
@@ -675,7 +762,7 @@ export const nightParade: SceneModule = {
         geo,
         new THREE.PointsMaterial({
           size,
-          map: wispSprite(),
+          map: tex,
           vertexColors: true,
           transparent: true,
           blending: THREE.AdditiveBlending,
@@ -688,10 +775,14 @@ export const nightParade: SceneModule = {
       return points;
     };
 
+    // 袋にまとわりつく塵。袋の面の少し外側を巡りながら立ちのぼって消える
+    motes = wispPoints(COUNT * DUST_PER, DUST_SIZE, hazeSprite());
+    root.add(motes);
+
     // 尾を先に足して、頭の玉をその上へ重ねる
-    souls = wispPoints(SOULS * TAIL, TAIL_SIZE);
+    souls = wispPoints(SOULS * TAIL, TAIL_SIZE, wispSprite());
     root.add(souls);
-    cores = wispPoints(SOULS, CORE_SIZE);
+    cores = wispPoints(SOULS, CORE_SIZE, wispSprite());
     root.add(cores);
 
     // 人魂のいくつかに実光源を持たせる。通り過ぎたところだけ道と袋が明るむ
@@ -719,6 +810,9 @@ export const nightParade: SceneModule = {
     bagTime.value = t;
     // 行列の先頭が道のどこにいるか。各自の位置に足すだけで、全員が同じ速さで進む
     const head = t / LAP;
+
+    const mpos = motes.geometry.attributes.position as THREE.BufferAttribute;
+    const mcol = motes.geometry.attributes.color as THREE.BufferAttribute;
 
     for (let i = 0; i < COUNT; i++) {
       const o = i * STRIDE;
@@ -761,9 +855,34 @@ export const nightParade: SceneModule = {
       // 袋は沈んだ色。個体ごとのオフセットに、歩調ぶんの明暗を足す。
       // ここを上げると袋が「赤い服」に見え始める。薄暗い塩化ビニルに見せるには、
       // 面の色は闇に沈めておいて、明るみは人魂の灯りだけに作らせるほうがよい
-      ember(color, 0.09 + oni[o + 8]! + 0.06 * (0.5 + 0.5 * Math.sin(gait)), hue);
+      ember(color, 0.16 + oni[o + 8]! + 0.06 * (0.5 + 0.5 * Math.sin(gait)), hue);
       bodies.setColorAt(i, color);
+
+      // 塵。袋の面の少し外側を巡りながら、裾から湧いて口の高さで消える。
+      // 位置は袋の輪郭（bagRadius）から取っているので、袋が痩せれば塵も痩せる
+      const cy = Math.cos(yaw);
+      const sy = Math.sin(yaw);
+      for (let m = 0; m < DUST_PER; m++) {
+        const d = (i * DUST_PER + m) * DUST_STRIDE;
+        // のぼりきったらまた裾へ戻る。粒ごとに速さが違うので層にならない
+        const h = (dust[d + 1]! + t * dust[d + 2]!) % 1;
+        const a = dust[d]! + t * 0.22;
+        // 面のすぐ外側。息をするように離れたり寄ったりする
+        const rr = bagRadius(h) * wide * size * (1.2 + 0.34 * Math.sin(t * 0.8 + dust[d]!));
+        const lx = Math.cos(a) * rr;
+        const lz = Math.sin(a) * rr;
+        const g = i * DUST_PER + m;
+        mpos.setXYZ(g, x + lx * cy + lz * sy, y + h * BAG_H * size, z - lx * sy + lz * cy);
+
+        // 湧き際と消え際を絞る。いきなり現れて消えると、粒が点滅しているように見える
+        const f = smoothstep(0, 0.12, h) * (1 - smoothstep(0.5, 1, h));
+        ember(color, 0.26, hue);
+        color.multiplyScalar(f * 0.5);
+        mcol.setXYZ(g, color.r, color.g, color.b);
+      }
     }
+    mpos.needsUpdate = true;
+    mcol.needsUpdate = true;
 
     // 人魂。尾の粒 j は「その人魂が j·TAIL_DT 秒前にいた場所」
     const pos = souls.geometry.attributes.position as THREE.BufferAttribute;
