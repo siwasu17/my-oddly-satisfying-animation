@@ -113,7 +113,7 @@ npm run shot -- <camelCase>
 目的は **Phase 2 で立てた仮説が、絵の上で本当に成り立つかを確かめること**。
 **仮説が外れていたら候補を差し替える。** 撮る前に決め打ちで Phase 4 へ進まない。
 
-PNG の扱い（自分で `Read` しない／`Explore` エージェントに講評させる手順）は
+PNG の扱い（自分で `Read` しない／`scene-critic` エージェントに講評させる手順）は
 `.claude/skills/new-scene/SKILL.md` の Phase 6 が正本。見え方の定性チェック 6 項目は
 `.claude/skills/new-scene/references/recipes.md` の「見え方のセルフチェック」が正本。
 **どちらもここに写さない。** 2 か所に置くと必ず食い違う。
