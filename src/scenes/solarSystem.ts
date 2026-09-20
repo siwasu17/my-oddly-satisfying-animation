@@ -24,8 +24,8 @@ const CAM_TARGET: [number, number, number] = [0, -1.2, 0]; // 俯瞰だと軌道
 
 const SUN_R = 1.9; // 太陽の半径
 const SUN_PULSE = 0.018; // 太陽がふくらむ幅（半径比）
-const SUN_GLOW = 0.72; // 太陽の発光。上げすぎるとコアが白飛びして暖色が抜ける
-const CORONA = 1.55; // コロナの殻の大きさ（太陽半径比）
+const SUN_GLOW = 0.4; // 太陽の発光。上げすぎるとコアが白飛びして暖色が抜ける
+const CORONA = 1.45; // コロナの殻の大きさ（太陽半径比）
 
 const ORBIT_N = 5; // 惑星の数
 const ORBIT_SEG = 128; // 軌道線の分割数
@@ -101,7 +101,7 @@ export const solarSystem: SceneModule = {
     // 太陽。この球だけは自分で光っているので、光源とコロナを持たせる
     sunMat = new THREE.MeshStandardMaterial({
       color: emberColor(0.86),
-      emissive: emberColor(0.94),
+      emissive: emberColor(0.84),
       emissiveIntensity: SUN_GLOW,
       roughness: 0.6,
     });
@@ -113,7 +113,7 @@ export const solarSystem: SceneModule = {
       new THREE.MeshBasicMaterial({
         color: emberColor(0.95, 0.02),
         transparent: true,
-        opacity: 0.07,
+        opacity: 0.045,
         side: THREE.BackSide,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
@@ -215,7 +215,7 @@ export const solarSystem: SceneModule = {
     const breathe = 1 + Math.sin(t * 0.7) * SUN_PULSE;
     sun.scale.setScalar(breathe);
     corona.scale.setScalar(1 + Math.sin(t * 0.7 + 1.1) * SUN_PULSE * 2);
-    sunMat.emissiveIntensity = SUN_GLOW + Math.sin(t * 1.27) * 0.06;
+    sunMat.emissiveIntensity = SUN_GLOW + Math.sin(t * 1.27) * 0.04;
 
     let arm = 0;
     for (let i = 0; i < ORBIT_N; i++) {
