@@ -33,11 +33,14 @@ const SINK = 2.2;
 /** プールの半径。大きくしすぎると画面下半分が平面に食われる */
 const POOL_R = 9.5;
 /** 樋の太さ（U 字の半径）。アヒルの幅より広く取る */
-const TUBE_R = 1;
+const TUBE_R = 0.88;
 /** 樋の断面の半角（ラジアン）。π で全周、小さいほど浅い皿になる */
 const TROUGH_OPEN = 2;
-/** アヒルの大きさ。小さいとシルエットが解像せず、ただの塊に見える */
-const DUCK_R = 0.85;
+/**
+ * アヒルの大きさ。小さくしすぎるとシルエットが解像せず、ただの塊に見える。
+ * 0.62 まで落とすとくちばしが数ピクセルに潰れて鳥に見えなくなった。
+ */
+const DUCK_R = 0.72;
 /** 1 本あたりのアヒルの数。大きくしたぶん数は絞る */
 const PER_LANE = 6;
 /** 1 本あたりの列の数 */
@@ -177,27 +180,31 @@ function troughGeometry(lane: Lane): THREE.BufferGeometry {
 }
 
 /**
- * アヒルのおもちゃ。体を原点、くちばしを +Z に置いた 4 つの部品で、
- * それぞれの位置と向きをジオメトリに焼いておく。こうすると 4 つの InstancedMesh が
- * 同じ姿勢行列を使い回せる。作り込むと実在感が出るので、球と円錐だけで止める。
+ * ラバーダック。体を原点、くちばしを +Z に置いた 4 つの部品で、それぞれの位置と向きを
+ * ジオメトリに焼いておく。こうすると 4 つの InstancedMesh が同じ姿勢行列を使い回せる。
+ * 大きな頭・短く平たいくちばし・小さな尾がゴム製アヒルの決め手で、
+ * 首を伸ばしたり嘴を尖らせたりすると途端に小鳥になる。目は付けない
+ * （この大きさでは点にしかならず、作り込むと実在感が出て気持ち悪くなる）。
  */
 function duckParts(): THREE.BufferGeometry[] {
+  // ぽってりと丸い胴。前後に伸ばさず、玉に近い比率にする
   const body = new THREE.SphereGeometry(1, 12, 10);
-  body.scale(0.95, 0.86, 1.15);
+  body.scale(0.98, 0.9, 1.06);
 
-  // 首のくびれが出るよう、頭は体から少し持ち上げて前へ置く
-  const head = new THREE.SphereGeometry(0.55, 10, 8);
-  head.translate(0, 0.86, 0.42);
+  // ラバーダックは頭が大きく、首はほとんど無い。胴に食い込むくらい近づける
+  const head = new THREE.SphereGeometry(0.66, 12, 9);
+  head.translate(0, 0.72, 0.32);
 
-  // 横顔の決め手。前へ長めに突き出す
-  const beak = new THREE.ConeGeometry(0.21, 0.62, 7);
-  beak.rotateX(Math.PI / 2); // +Y 向きの円錐を前（+Z）へ倒す
-  beak.translate(0, 0.78, 1.1);
+  // くちばしは尖らせず平たい幅広に。ただし輪郭から前へ張り出させないと、
+  // この大きさでは頭に埋もれて鳥に見えなくなる
+  const beak = new THREE.SphereGeometry(0.3, 8, 6);
+  beak.scale(0.96, 0.38, 1.55);
+  beak.translate(0, 0.58, 1.08);
 
-  // もう 1 か所の出っ張り。後ろ上へ大きく跳ね上げる
-  const tail = new THREE.ConeGeometry(0.34, 0.78, 4);
-  tail.rotateX(-1.15);
-  tail.translate(0, 0.52, -1);
+  // 尾は小さいが、輪郭を切り欠く程度には後ろ上へ跳ね上げる
+  const tail = new THREE.ConeGeometry(0.26, 0.5, 4);
+  tail.rotateX(-1.2);
+  tail.translate(0, 0.48, -0.96);
 
   return [body, head, beak, tail];
 }
@@ -217,13 +224,14 @@ export const waterSlide: SceneModule = {
     pivot = new THREE.Group();
     root.add(pivot);
 
-    // 樋。手前の巻きが奥を隠さないよう薄く、depthWrite も切っておく
+    // 樋。手前の巻きが奥を隠さないよう薄く、depthWrite も切っておく。
+    // アヒルと明るさが近いと、樋に重なった個体の輪郭が溶けるので暗く保つ
     const troughMat = new THREE.MeshStandardMaterial({
-      color: emberColor(0.28),
+      color: emberColor(0.18),
       roughness: 0.5,
       metalness: 0.35,
       transparent: true,
-      opacity: 0.3,
+      opacity: 0.26,
       depthWrite: false,
       side: THREE.DoubleSide,
     });
@@ -309,7 +317,9 @@ export const waterSlide: SceneModule = {
 
     const hue = drift(t);
     duckMat.color.copy(ember(color, 0.82, hue));
-    beakMat.color.copy(ember(color, 0.44, hue));
+    // 実物のくちばしは体より濃いオレンジだが、暗い画面では暗い差分が潰れて
+    // 見分けの助けにならない。体より明るい側へ振る
+    beakMat.color.copy(ember(color, 0.95, hue));
 
     const base = t / PERIOD;
 
