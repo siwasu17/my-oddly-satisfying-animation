@@ -1,0 +1,376 @@
+import * as THREE from 'three';
+import type { SceneModule } from '../types.ts';
+import { tone } from '../audio.ts';
+import { SURFACE, ember, drift } from '../palette.ts';
+
+/**
+ * 何が動くか: 10 個の 10 面ダイスが上空からまとめて撒かれ、床で跳ねながら歩幅を縮めて転がり、
+ *   てんでばらばらの向きで止まる。止まると上を向いた面だけがじわりと灯り、
+ *   しばらく結果を見せてから床へ沈んで消え、すぐに次の一投が始まる。
+ * 気持ちよさの芯: 10 個が一斉に散って、跳ねる幅が縮みながら止まっていく「ばらけ方」。
+ *   どこに何個固まるか、どの面が上に来るかが毎回読めない。
+ * ループの周期: 1 投 8 秒（撒く 1 秒 → 跳ねて転がる 3 秒 → 灯って見せる 2.5 秒 → 沈む 1.5 秒）。
+ * カメラ: やや高い斜め上から。転がる軌跡と上を向いた面の両方が見える角度。
+ * 音: 最初の着地と二跳ね目に pluck（半分のダイスだけ）、止まる瞬間に drop。音程は出目で変わる。
+ * スコープ外: 数字や点による目の表記（上面の明るさの差で代わりにする）、ダイス同士の衝突。
+ *
+ * 落ち場所と出目は一投ごとに変わる。乱数の種は「何投目か」から作るので、タブを離れて
+ * 戻っても同じ投げが再現される。種を振り直すのはシーンを開いたときだけ
+ * （毎回ちがう結果にしてほしい、という指定のため build で 1 度だけ散らす）。
+ */
+
+// ---- 調整する数値 ----
+const DICE = 10; // ダイスの個数
+const R = 1.0; // 赤道の半径
+const H = 1.18; // 上下の頂点までの高さ
+const M = H / 9.4721; // 赤道のジグザグの振れ幅。この比のときだけ 10 枚の凧形が平面になる
+const SPREAD = 6.0; // 止まる位置の散らばり半径
+const MIN_GAP = 2.15; // ダイス同士の最短距離。これ未満なら押し離す
+const FLOOR_R = 9.6; // 床の半径。ダイスの散らばりより一回り広いだけにして「台」として読ませる
+const PERIOD = 8.0; // 一投の秒数
+const THROW_SPAN = 0.26; // 手を離れる時刻のばらつき
+const START_Y = 11; // 撒かれる高さ
+const START_R = 1.2; // 撒かれた瞬間の塊の広がり
+const ROLL_MIN = 3.0; // 手を離れてから止まるまで
+const ROLL_VAR = 0.7;
+const FALL_FRAC = 0.32; // そのうち最初の着地までの割合
+const BOUNCES = 4; // 着地後に跳ねる回数
+const BOUNCE_RATIO = 0.62; // 一跳ねごとに滞空時間と歩幅にかかる比
+const SPIN_A = 16; // 転がり全体の回転量（主軸）
+const SPIN_B = 9; // 同（副軸。減衰が速いので跳ねている間だけ効く）
+const GLOW_RISE = 0.34; // 止まってから上面が灯りきるまで
+const SINK_AT = 6.5; // 沈み始める時刻
+const SINK_SPAN = 1.4; // 沈みきるまで
+const SINK_DEPTH = 3.4; // 沈む深さ
+const TINT_MIN = 0.20; // ダイス本体の色（0 = 暗い薔薇 / 1 = 明るい琥珀）
+const TINT_VAR = 0.12;
+const FACET_RANGE = 0.16; // 上を向いた面ほど明るくする幅。面の境目を読ませる
+const GLOW_TINT = 0.56; // 止まったとき、上面の色をどこまで持ち上げるか
+const GLOW_ADD = 0.29; // 同、明度への上乗せ（ブルームが拾う）
+
+const UP = new THREE.Vector3(0, 1, 0);
+const nWorld = new THREE.Vector3();
+const color = new THREE.Color();
+const qa = new THREE.Quaternion();
+const qb = new THREE.Quaternion();
+
+/** 10 面ダイス（五角台形十二面体）を作る。面 f の頂点は色属性の f*6..f*6+5 に並ぶ。 */
+function buildDieGeometry(): { geo: THREE.BufferGeometry; normals: THREE.Vector3[]; rest: number } {
+  const apexUp = new THREE.Vector3(0, H, 0);
+  const apexDown = new THREE.Vector3(0, -H, 0);
+  const ring: THREE.Vector3[] = [];
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2;
+    ring.push(new THREE.Vector3(Math.cos(a) * R, i % 2 === 0 ? M : -M, Math.sin(a) * R));
+  }
+
+  const pos: number[] = [];
+  const normals: THREE.Vector3[] = [];
+  const e1 = new THREE.Vector3();
+  const e2 = new THREE.Vector3();
+  const n = new THREE.Vector3();
+
+  // 凧形 1 枚を三角形 2 枚に割る。法線が外を向くように巻き方向をそろえる。
+  const kite = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3, d: THREE.Vector3): void => {
+    n.copy(e1.subVectors(b, a).cross(e2.subVectors(c, a))).normalize();
+    const outward = n.dot(b) > 0;
+    const quad = outward ? [a, b, c, d] : [a, d, c, b];
+    if (!outward) n.negate();
+    normals.push(n.clone());
+    const tri = [quad[0], quad[1], quad[2], quad[0], quad[2], quad[3]];
+    for (const v of tri) pos.push(v.x, v.y, v.z);
+  };
+
+  for (let j = 0; j < 5; j++) {
+    kite(apexUp, ring[(j * 2) % 10], ring[(j * 2 + 1) % 10], ring[(j * 2 + 2) % 10]);
+  }
+  for (let j = 0; j < 5; j++) {
+    kite(apexDown, ring[(j * 2 + 1) % 10], ring[(j * 2 + 2) % 10], ring[(j * 2 + 3) % 10]);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.computeVertexNormals();
+
+  // 面が水平になったとき、反対側の面が床に触れる。そのときの重心の高さ。
+  const rest = Math.abs(normals[0].dot(ring[0]));
+  return { geo, normals, rest };
+}
+
+const { geo: BASE_GEO, normals: FACE_N, rest: REST_Y } = buildDieGeometry();
+
+interface Die {
+  mesh: THREE.Mesh;
+  colors: THREE.BufferAttribute;
+  sx: number;
+  sz: number;
+  fx: number;
+  fz: number;
+  t0: number; // 手を離れる時刻
+  tA: number; // 最初の着地までの時間
+  dur: number; // 止まるまでの時間
+  total: number; // 水平距離の正規化に使う合計
+  g: number; // 落下の加速度
+  segs: number[]; // 跳ねるたびの滞空時間
+  face: number; // 上を向く面 = 出目
+  tint: number;
+  sinkDelay: number;
+  axA: THREE.Vector3;
+  axB: THREE.Vector3;
+  qFinal: THREE.Quaternion;
+}
+
+let dice: Die[] = [];
+let seedOffset = 0;
+let cycle = -1;
+
+const makeRng = (seed: number): (() => number) => {
+  let s = seed <= 0 || seed >= 1 ? 0.731 : seed;
+  return () => (s = (s * 9301 + 0.49297) % 1);
+};
+
+/** c 投目の落ち場所・出目・タイミングを決め直す。c が同じなら何度呼んでも同じ結果になる。 */
+function roll(c: number): void {
+  const rng = makeRng((c * 0.6180339887 + seedOffset) % 1);
+  for (let k = 0; k < 6; k++) rng();
+
+  for (let i = 0; i < DICE; i++) {
+    const d = dice[i];
+    // 角度を 10 等分した持ち場にジッタを足す。少ない乱数でも片側に寄らない。
+    const a = ((i + 0.5 + (rng() - 0.5) * 0.8) / DICE) * Math.PI * 2;
+    const rad = SPREAD * Math.sqrt(0.08 + 0.92 * rng());
+    d.fx = Math.cos(a) * rad;
+    d.fz = Math.sin(a) * rad;
+
+    const sa = rng() * Math.PI * 2;
+    const sr = START_R * Math.sqrt(rng());
+    d.sx = Math.cos(sa) * sr;
+    d.sz = Math.sin(sa) * sr;
+
+    d.t0 = rng() * THROW_SPAN;
+    const span = ROLL_MIN + rng() * ROLL_VAR;
+    d.tA = span * FALL_FRAC;
+    d.g = (2 * START_Y) / (d.tA * d.tA);
+
+    // 残り時間を等比で刻む。滞空も歩幅も一跳ねごとに BOUNCE_RATIO 倍に縮む。
+    const rest = span - d.tA;
+    const denom = (1 - Math.pow(BOUNCE_RATIO, BOUNCES)) / (1 - BOUNCE_RATIO);
+    let dur = d.tA;
+    let total = d.tA;
+    let v = 1;
+    for (let k = 0; k < BOUNCES; k++) {
+      const seg = (rest / denom) * Math.pow(BOUNCE_RATIO, k);
+      d.segs[k] = seg;
+      v *= BOUNCE_RATIO;
+      dur += seg;
+      total += v * seg;
+    }
+    d.dur = dur;
+    d.total = total;
+
+    d.face = Math.floor(rng() * 10) % 10;
+    d.tint = TINT_MIN + rng() * TINT_VAR;
+    d.sinkDelay = rng() * 0.36;
+
+    d.axA.set(rng() * 2 - 1, rng() * 2 - 1, rng() * 2 - 1).normalize();
+    d.axB.set(rng() * 2 - 1, rng() * 2 - 1, rng() * 2 - 1).normalize();
+
+    qa.setFromUnitVectors(FACE_N[d.face], UP);
+    qb.setFromAxisAngle(UP, rng() * Math.PI * 2);
+    d.qFinal.copy(qb).multiply(qa);
+  }
+
+  // 重なって止まらないように押し離す。転がってぶつかった結果のように見せたいので弱めに。
+  for (let pass = 0; pass < 5; pass++) {
+    for (let i = 0; i < DICE; i++) {
+      for (let j = i + 1; j < DICE; j++) {
+        const a = dice[i];
+        const b = dice[j];
+        const dx = b.fx - a.fx;
+        const dz = b.fz - a.fz;
+        const dist = Math.hypot(dx, dz);
+        if (dist >= MIN_GAP || dist < 1e-4) continue;
+        const push = (MIN_GAP - dist) * 0.5;
+        a.fx -= (dx / dist) * push;
+        a.fz -= (dz / dist) * push;
+        b.fx += (dx / dist) * push;
+        b.fz += (dz / dist) * push;
+      }
+    }
+  }
+  for (let i = 0; i < DICE; i++) {
+    const d = dice[i];
+    const dist = Math.hypot(d.fx, d.fz);
+    if (dist > SPREAD) {
+      d.fx = (d.fx / dist) * SPREAD;
+      d.fz = (d.fz / dist) * SPREAD;
+    }
+  }
+}
+
+/** 手を離れてから s 秒後の、床からの高さ。 */
+function heightAt(d: Die, s: number): number {
+  if (s <= 0) return START_Y;
+  if (s < d.tA) return START_Y - 0.5 * d.g * s * s;
+  let u = s - d.tA;
+  for (let k = 0; k < BOUNCES; k++) {
+    const seg = d.segs[k];
+    if (u < seg) return 0.5 * d.g * u * (seg - u);
+    u -= seg;
+  }
+  return 0;
+}
+
+/** 同じく、撒かれた地点から止まる地点までの進み具合 0..1。 */
+function progressAt(d: Die, s: number): number {
+  if (s <= 0) return 0;
+  if (s < d.tA) return s / d.total;
+  let acc = d.tA;
+  let u = s - d.tA;
+  let v = 1;
+  for (let k = 0; k < BOUNCES; k++) {
+    const seg = d.segs[k];
+    v *= BOUNCE_RATIO;
+    if (u < seg) return (acc + v * u) / d.total;
+    acc += v * seg;
+    u -= seg;
+  }
+  return 1;
+}
+
+export const d10Toss: SceneModule = {
+  name: 'D10 Toss',
+  desc: '10 面ダイスを一斉に撒く。跳ねて転がって止まり、上を向いた面だけが灯る。',
+  camera: { pos: [3.4, 9.2, 13.2], target: [0, 0.5, 0] },
+
+  build(root) {
+    const floor = new THREE.Mesh(
+      new THREE.CircleGeometry(FLOOR_R, 96),
+      new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.78, metalness: 0.14 }),
+    );
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.y = -0.02;
+    root.add(floor);
+
+    const mat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      flatShading: true,
+      roughness: 0.34,
+      metalness: 0.42,
+    });
+
+    dice = [];
+    for (let i = 0; i < DICE; i++) {
+      const geo = BASE_GEO.clone();
+      const colors = new THREE.Float32BufferAttribute(new Float32Array(60 * 3), 3);
+      geo.setAttribute('color', colors);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.y = -SINK_DEPTH;
+      root.add(mesh);
+      dice.push({
+        mesh,
+        colors,
+        sx: 0,
+        sz: 0,
+        fx: 0,
+        fz: 0,
+        t0: 0,
+        tA: 1,
+        dur: 3,
+        total: 1,
+        g: 20,
+        segs: new Array<number>(BOUNCES).fill(0.5),
+        face: 0,
+        tint: TINT_MIN,
+        sinkDelay: 0,
+        axA: new THREE.Vector3(1, 0, 0),
+        axB: new THREE.Vector3(0, 0, 1),
+        qFinal: new THREE.Quaternion(),
+      });
+    }
+
+    // 開き直すたびに出目を振り直す（毎回ちがう結果にするための、ここだけの乱数）。
+    seedOffset = Math.random();
+    cycle = -1;
+  },
+
+  update(t) {
+    const c = Math.floor(t / PERIOD);
+    if (c !== cycle) {
+      cycle = c;
+      roll(c);
+    }
+    const local = t - c * PERIOD;
+    const shift = drift(t);
+
+    for (let i = 0; i < DICE; i++) {
+      const d = dice[i];
+      const s = local - d.t0;
+      const sink = Math.min(1, Math.max(0, (local - SINK_AT - d.sinkDelay) / SINK_SPAN));
+
+      if (s <= 0) {
+        // 前の一投の続き。床下に隠したまま次の出番を待つ。
+        d.mesh.position.set(d.fx, -SINK_DEPTH, d.fz);
+      } else {
+        const p = progressAt(d, s);
+        const y = REST_Y + heightAt(d, s) - SINK_DEPTH * Math.pow(sink, 1.8);
+        d.mesh.position.set(d.sx + (d.fx - d.sx) * p, y, d.sz + (d.fz - d.sz) * p);
+
+        const left = Math.max(0, 1 - s / d.dur);
+        qa.setFromAxisAngle(d.axA, SPIN_A * Math.pow(left, 1.7));
+        qb.setFromAxisAngle(d.axB, SPIN_B * Math.pow(left, 2.8));
+        d.mesh.quaternion.copy(qa).multiply(qb).multiply(d.qFinal);
+      }
+
+      // 止まってから上面だけが灯る。明るさは出目で変わる（大きい目ほど強く光る）。
+      const lit =
+        Math.min(1, Math.max(0, (s - d.dur) / GLOW_RISE)) *
+        (1 - sink) *
+        (0.62 + 0.38 * (d.face / 9));
+
+      // 面ごとに、いま空を向いている度合いで明るさを変える。転がっている間も
+      // 明暗が入れ替わり続けるので、一様な塊ではなく「面のある立体」に見える。
+      const arr = d.colors.array as Float32Array;
+      for (let f = 0; f < 10; f++) {
+        nWorld.copy(FACE_N[f]).applyQuaternion(d.mesh.quaternion);
+        let n = d.tint + FACET_RANGE * (0.5 + 0.5 * nWorld.y);
+        let glow = 0;
+        if (f === d.face && lit > 0.001) {
+          n += GLOW_TINT * lit;
+          glow = GLOW_ADD * lit;
+        }
+        ember(color, n, shift, glow);
+        for (let v = f * 6; v < f * 6 + 6; v++) {
+          arr[v * 3] = color.r;
+          arr[v * 3 + 1] = color.g;
+          arr[v * 3 + 2] = color.b;
+        }
+      }
+      d.colors.needsUpdate = true;
+    }
+  },
+
+  sound(t, dt, sfx) {
+    const c = Math.floor(t / PERIOD);
+    const local = t - c * PERIOD;
+    const prev = local - dt;
+    if (prev < 0) return; // 一投の切れ目。次のフレームから拾う
+
+    for (let i = 0; i < DICE; i++) {
+      const d = dice[i];
+      const pan = Math.max(-1, Math.min(1, d.fx / SPREAD));
+      const hit = d.t0 + d.tA;
+      if (i % 2 === 0 && prev < hit && local >= hit) {
+        sfx.pluck(tone(6 + (d.face % 5)), { gain: 0.34, decay: 1.3, pan });
+      }
+      const hit2 = hit + d.segs[0];
+      if (i % 4 === 0 && prev < hit2 && local >= hit2) {
+        sfx.pluck(tone(11 + (d.face % 4)), { gain: 0.16, decay: 0.9, pan });
+      }
+      const stop = d.t0 + d.dur;
+      if (i % 3 === 0 && prev < stop && local >= stop) {
+        sfx.drop(tone(2 + (d.face % 3)), { gain: 0.2, decay: 0.7, pan });
+      }
+    }
+  },
+};
