@@ -25,20 +25,20 @@ const DICE = 10; // ダイスの個数
 const R = 1.0; // 赤道の半径
 const H = 1.18; // 上下の頂点までの高さ
 const M = H / 9.4721; // 赤道のジグザグの振れ幅。この比のときだけ 10 枚の凧形が平面になる
-const SPREAD = 6.0; // 止まる位置の散らばり半径
+const SPREAD = 7.4; // 止まる位置の散らばり半径
 const MIN_GAP = 2.35; // ダイス同士の最短距離。これ未満なら押し離す
-const FLOOR_R = 9.6; // 床の半径。ダイスの散らばりより一回り広いだけにして「台」として読ませる
+const FLOOR_R = 10.8; // 床の半径。ダイスの散らばりより一回り広いだけにして「台」として読ませる
 const PERIOD = 8.0; // 一投の秒数
 const THROW_SPAN = 0.42; // 手を離れる時刻のばらつき。先行が着く頃に後続が離れ、軌道上に伸びる
-const THROW_X = -6.0; // 投げ入れ口。床の外、カメラから見て左手前の低いところ
-const THROW_Z = 4.0;
+const THROW_X = -5.2; // 投げ入れ口。床の外、カメラから見て左手前の低いところ
+const THROW_Z = 3.4;
 const THROW_Y = 3.4; // 手を離れる高さ。振りかぶった手の高さくらい
 const THROW_V0 = 1.3; // 手を離れた瞬間の上向きの速さ。少し放り上げてから落ちる
-const THROW_ALONG = 1.9; // 手を離れた瞬間の散らばり（投げ込む向きに沿った長さ）
-const THROW_ACROSS = 1.0; // 同、それに直交する向きの幅。狭いと団子に見えるので沿う向きを長く取る
-const THROW_RISE = 1.0; // 同、高さのばらつき。横へ広げると画面の端に掛かるので、縦で散らす
+const THROW_ALONG = 3.8; // 手を離れた瞬間の散らばり（投げ込む向きに沿った長さ）
+const THROW_ACROSS = 1.9; // 同、それに直交する向きの幅。狭いと団子に見えるので沿う向きを長く取る
+const THROW_RISE = 2.0; // 同、高さのばらつき。横へ広げると画面の端に掛かるので、縦で散らす
 const ROLL_MIN = 3.0; // 手を離れてから止まるまで
-const ROLL_VAR = 0.7;
+const ROLL_VAR = 0.55;
 const FALL_FRAC = 0.2; // そのうち最初の着地までの割合。低く速く飛ばすほど横投げに見える
 const BOUNCES = 5; // 着地後に跳ねる回数
 const BOUNCE_RATIO = 0.66; // 一跳ねごとに滞空時間と歩幅にかかる比
@@ -356,7 +356,7 @@ function progressAt(d: Die, s: number): number {
 export const d10Toss: SceneModule = {
   name: 'D10 Toss',
   desc: 'ルーンを刻んだ 10 面ダイスを一斉に撒く。跳ねて転がって止まり、上を向いた面が灯る。',
-  camera: { pos: [3.4, 9.2, 13.2], target: [0, 0.5, 0] },
+  camera: { pos: [3.8, 10.4, 14.8], target: [0, 0.5, 0] },
 
   build(root) {
     const floor = new THREE.Mesh(
