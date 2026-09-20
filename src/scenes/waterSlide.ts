@@ -6,17 +6,21 @@ import { ember, emberColor, drift } from '../palette.ts';
 /**
  * Water Slide。
  *
- * 空中に浮いた 3 本のらせんの樋を、水の粒が束になって滑り降りる。樋は上が開いた
- * U 字なので中の粒が隠れない。下へ行くほど速くなるので束は流れながら伸び、
- * 出口から放り出されてプールへ落ち、着水した場所から光の輪が広がって消える。
+ * 空中に浮いた 3 本のらせんの樋を、アヒルのおもちゃが列になって滑り降りる。樋は上が
+ * 開いた U 字なので、中の一匹ずつが隠れない。下へ行くほど速くなるので列は流れながら
+ * 伸び、出口から放り出されてプールへ落ち、水面をくぐって消える。落ちた場所からは
+ * 輪が広がる。
  *
- * 束は 3 本 × 3 つで 9 つあり、12 秒のループの中を 1.3 秒おきに順ぐりに落ちていく。
- * 粒の位置はすべて経過秒から作り直しているので、いつ開いても同じ流れになる。
+ * アヒルは球と円錐だけで組んだ最小限のシルエット（体・頭・くちばし・尾）で、
+ * 滑っている間は進行方向を向きながら左右にゆれる。
+ *
+ * 列は 3 本 × 3 つで 9 つあり、12 秒のループの中を 1.3 秒おきに順ぐりに落ちていく。
+ * 位置はすべて経過秒から作り直しているので、いつ開いても同じ流れになる。
  */
 
 /* ── 調整する数値 ───────────────────────────────────────── */
 
-/** 粒が入口から着水するまで（秒）。ループの周期そのもの */
+/** アヒルが入口から着水するまで（秒）。ループの周期そのもの */
 const PERIOD = 12;
 /** コースの入口の高さ */
 const TOP = 13.4;
@@ -24,32 +28,43 @@ const TOP = 13.4;
 const EXIT_Y = 2.4;
 /** 水面の高さ */
 const WATER_Y = 0;
+/** 着水後どれだけ沈むか。水面をくぐって隠れる深さ */
+const SINK = 2.2;
 /** プールの半径。大きくしすぎると画面下半分が平面に食われる */
 const POOL_R = 9.5;
-/** 樋の太さ（U 字の半径） */
-const TUBE_R = 0.75;
+/** 樋の太さ（U 字の半径）。アヒルの幅より広く取る */
+const TUBE_R = 1;
 /** 樋の断面の半角（ラジアン）。π で全周、小さいほど浅い皿になる */
 const TROUGH_OPEN = 2;
-/** 水の粒の基準の大きさ */
-const DROP_R = 0.3;
-/** 1 本あたりの粒の数 */
-const PER_LANE = 60;
-/** 1 本あたりの束の数 */
-const CLUSTERS = 3;
-/** 束の広がり（ループ位相）。小さいほど固まって流れる */
-const CLUSTER_SPREAD = 0.075;
+/** アヒルの大きさ。小さいとシルエットが解像せず、ただの塊に見える */
+const DUCK_R = 0.85;
+/** 1 本あたりのアヒルの数。大きくしたぶん数は絞る */
+const PER_LANE = 6;
+/** 1 本あたりの列の数 */
+const CLUSTERS = 2;
+/** 列の広がり（ループ位相）。狭くしすぎると出口のあたりで詰まって重なる */
+const CLUSTER_SPREAD = 0.24;
 /** 樋を出る進み具合（0..1）。ここから先は落下 */
-const S_EXIT = 0.84;
-/** 樋の中での加速。1 より大きいほど下で速くなる */
-const GLIDE_EASE = 1.4;
+const S_EXIT = 0.78;
+/**
+ * 落下のどこで水面を切るか（0..1）。残りが沈んでいく区間になる。
+ * 短くすると沈む時間が伸び、水面と交差したアヒルが常に画面にいるようになる。
+ */
+const SPLASH_Q = 0.35;
+/** 樋の中での加速。1 より大きいほど下で速くなる。低いと出口で列が詰まる */
+const GLIDE_EASE = 1.7;
 /** 出口から水平に飛び出す距離 */
 const FALL_SPREAD = 1.8;
-/** 落下のどこから粒が溶け始めるか（0..1） */
-const FADE_AT = 0.84;
-/** 波紋が広がりきるまでのループ位相。長いほど同時に見える輪が増える */
-const RING_LIFE = 0.22;
+/** 滑っている間の横ゆれの深さ */
+const WOBBLE = 0.17;
+/** 波紋が広がりきるまでのループ位相。沈んでいく時間と揃えないと輪だけが残る */
+const RING_LIFE = 0.14;
 /** 波紋の最大半径 */
 const RING_R = 3.6;
+/** 1 回の着水で出す輪の本数 */
+const RING_WAVES = 3;
+/** 輪と輪の間隔（ループ位相） */
+const RING_GAP = 0.02;
 /** 全体がゆっくり回る速さ（ラジアン／秒） */
 const SPIN = 0.016;
 /** 樋の長さ方向・断面方向の分割数 */
@@ -64,35 +79,44 @@ interface Lane {
   phase: number;
 }
 const LANES: Lane[] = [
-  { r0: 8.9, r1: 6.4, turns: 1.4, phase: 0.0 },
+  { r0: 8.9, r1: 6.6, turns: 1.4, phase: 0.0 },
   { r0: 6.4, r1: 4.3, turns: 1.8, phase: 2.2 },
-  { r0: 4.1, r1: 2.3, turns: 2.25, phase: 4.3 },
+  { r0: 4.1, r1: 2.0, turns: 2.25, phase: 4.3 },
 ];
 
 const TAU = Math.PI * 2;
 const TOTAL = LANES.length * PER_LANE;
 const RINGS = LANES.length * CLUSTERS;
 
+/** 樋の中でアヒルが座る高さ。樋の底に浮かせる */
+const RIDE_Y = DUCK_R * 0.8 - TUBE_R;
+/** 着水するループ位相。1 との差だけ波紋と音を前倒しする */
+const SPLASH_LEAD = 1 - (S_EXIT + SPLASH_Q * (1 - S_EXIT));
+
 const frac = (x: number): number => x - Math.floor(x);
 
 const dummy = new THREE.Object3D();
+dummy.rotation.order = 'YXZ'; // 進行方向を向けてから、その軸まわりに傾ける
 const color = new THREE.Color();
 
-/** 粒ごとの [レーン番号, ループ位相のずれ, 樋の中の横ずれ, 上下ずれ, 大きさ] */
-const drops = new Float32Array(TOTAL * 5);
-/** 束ごとのループ位相のずれ。波紋と着水音もこれに乗る */
+/** アヒルごとの [レーン番号, ループ位相のずれ, 樋の中の横ずれ, ゆれの位相, 大きさ] */
+const ducks = new Float32Array(TOTAL * 5);
+/** 列ごとのループ位相のずれ。波紋と着水音もこれに乗る */
 const clusterOff = new Float32Array(RINGS);
-/** 束ごとの着水地点 [x, z] */
+/** 列ごとの着水地点 [x, z] */
 const splash = new Float32Array(RINGS * 2);
 
 let pivot: THREE.Group;
-let dropMesh: THREE.InstancedMesh;
+/** 体・頭・くちばし・尾。4 つとも同じ姿勢行列を共有する */
+let parts: THREE.InstancedMesh[] = [];
+let duckMat: THREE.MeshStandardMaterial;
+let beakMat: THREE.MeshStandardMaterial;
 let ringMesh: THREE.InstancedMesh;
 
 let ticks = tickers(RINGS);
 let step = 0;
 
-/** らせんの u（0..1）の位置。樋のジオメトリと粒で同じ式を使う */
+/** らせんの u（0..1）の位置。樋のジオメトリとアヒルで同じ式を使う */
 function lanePoint(lane: Lane, u: number, out: THREE.Vector3): THREE.Vector3 {
   const a = lane.phase + u * lane.turns * TAU;
   const r = lane.r0 + (lane.r1 - lane.r0) * u;
@@ -101,7 +125,7 @@ function lanePoint(lane: Lane, u: number, out: THREE.Vector3): THREE.Vector3 {
 
 /**
  * らせんに沿って、上が開いた U 字の樋を張る。
- * 断面の「上」は常にワールドの上。管にすると中の粒が見えなくなるので使わない。
+ * 断面の「上」は常にワールドの上。管にすると中のアヒルが見えなくなるので使わない。
  */
 function troughGeometry(lane: Lane): THREE.BufferGeometry {
   const cols = TROUGH_ARC + 1;
@@ -152,9 +176,35 @@ function troughGeometry(lane: Lane): THREE.BufferGeometry {
   return geo;
 }
 
+/**
+ * アヒルのおもちゃ。体を原点、くちばしを +Z に置いた 4 つの部品で、
+ * それぞれの位置と向きをジオメトリに焼いておく。こうすると 4 つの InstancedMesh が
+ * 同じ姿勢行列を使い回せる。作り込むと実在感が出るので、球と円錐だけで止める。
+ */
+function duckParts(): THREE.BufferGeometry[] {
+  const body = new THREE.SphereGeometry(1, 12, 10);
+  body.scale(0.95, 0.86, 1.15);
+
+  // 首のくびれが出るよう、頭は体から少し持ち上げて前へ置く
+  const head = new THREE.SphereGeometry(0.55, 10, 8);
+  head.translate(0, 0.86, 0.42);
+
+  // 横顔の決め手。前へ長めに突き出す
+  const beak = new THREE.ConeGeometry(0.21, 0.62, 7);
+  beak.rotateX(Math.PI / 2); // +Y 向きの円錐を前（+Z）へ倒す
+  beak.translate(0, 0.78, 1.1);
+
+  // もう 1 か所の出っ張り。後ろ上へ大きく跳ね上げる
+  const tail = new THREE.ConeGeometry(0.34, 0.78, 4);
+  tail.rotateX(-1.15);
+  tail.translate(0, 0.52, -1);
+
+  return [body, head, beak, tail];
+}
+
 export const waterSlide: SceneModule = {
   name: 'Water Slide',
-  desc: 'らせんの樋を水の粒が束で滑り落ち、プールへ着水して輪が広がる。',
+  desc: 'らせんの樋をアヒルのおもちゃが列で滑り落ち、プールへ次々に沈んでいく。',
   camera: { pos: [0, 12.6, 26], target: [0, 4.8, 0] },
 
   build(root) {
@@ -181,7 +231,7 @@ export const waterSlide: SceneModule = {
       pivot.add(new THREE.Mesh(troughGeometry(lane), troughMat));
     }
 
-    // 束は 9 つ。レーンをまたいで順ぐりに落ちるよう、位相を均等に配る
+    // 列は 9 つ。レーンをまたいで順ぐりに落ちるよう、位相を均等に配る
     for (let lane = 0; lane < LANES.length; lane++) {
       for (let c = 0; c < CLUSTERS; c++) {
         const i = lane * CLUSTERS + c;
@@ -189,7 +239,7 @@ export const waterSlide: SceneModule = {
       }
     }
 
-    // 粒を束へ割り当てる。束の中では位相を等間隔に置き、わずかだけ乱数で崩す
+    // アヒルを列へ割り当てる。列の中では位相を等間隔に置き、わずかだけ乱数で崩す
     const perCluster = PER_LANE / CLUSTERS;
     for (let lane = 0; lane < LANES.length; lane++) {
       for (let k = 0; k < PER_LANE; k++) {
@@ -197,25 +247,27 @@ export const waterSlide: SceneModule = {
         const c = Math.min(CLUSTERS - 1, Math.floor(k / perCluster));
         const inner = (k - c * perCluster) / perCluster - 0.5;
         const b = i * 5;
-        drops[b] = lane;
-        drops[b + 1] = frac(
-          clusterOff[lane * CLUSTERS + c] + (inner + (rnd() - 0.5) * 0.35) * CLUSTER_SPREAD,
+        ducks[b] = lane;
+        ducks[b + 1] = frac(
+          clusterOff[lane * CLUSTERS + c] + (inner + (rnd() - 0.5) * 0.3) * CLUSTER_SPREAD,
         );
-        drops[b + 2] = rnd() * 2 - 1;
-        drops[b + 3] = rnd();
-        drops[b + 4] = DROP_R * (0.74 + rnd() * 0.56);
+        ducks[b + 2] = rnd() * 2 - 1;
+        ducks[b + 3] = rnd();
+        ducks[b + 4] = DUCK_R * (0.92 + rnd() * 0.18);
       }
     }
 
-    dropMesh = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(1, 10, 8),
-      new THREE.MeshStandardMaterial({ roughness: 0.16, metalness: 0.1 }),
-      TOTAL,
-    );
-    dropMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    pivot.add(dropMesh);
+    // おもちゃなので個体で色を変えず、材質 2 つで塗り分ける
+    duckMat = new THREE.MeshStandardMaterial({ roughness: 0.42, metalness: 0.06 });
+    beakMat = new THREE.MeshStandardMaterial({ roughness: 0.46, metalness: 0.06 });
+    parts = duckParts().map((geo, i) => {
+      const mesh = new THREE.InstancedMesh(geo, i === 2 ? beakMat : duckMat, TOTAL);
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      pivot.add(mesh);
+      return mesh;
+    });
 
-    // 着水地点。落下区間の式に q = 1 を入れたもの
+    // 着水地点。落下区間の式に水面を切る q を入れたもの
     const p = new THREE.Vector3();
     for (let i = 0; i < RINGS; i++) {
       const lane = LANES[Math.floor(i / CLUSTERS)];
@@ -225,18 +277,18 @@ export const waterSlide: SceneModule = {
       splash[i * 2 + 1] = p.z + Math.cos(a) * FALL_SPREAD;
     }
 
-    const ringGeo = new THREE.RingGeometry(0.9, 1, 56);
+    const ringGeo = new THREE.RingGeometry(0.72, 1, 48);
     ringGeo.rotateX(-Math.PI / 2);
     ringMesh = new THREE.InstancedMesh(
       ringGeo,
       new THREE.MeshBasicMaterial({
         transparent: true,
-        opacity: 0.6,
+        opacity: 0.85,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         side: THREE.DoubleSide,
       }),
-      RINGS,
+      RINGS * RING_WAVES,
     );
     ringMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     pivot.add(ringMesh);
@@ -245,7 +297,7 @@ export const waterSlide: SceneModule = {
     // 弱い反射だけを残す。完全なマット面にすると今度は板に見える
     const pool = new THREE.Mesh(
       new THREE.CircleGeometry(POOL_R, 96),
-      new THREE.MeshStandardMaterial({ color: emberColor(0.09), roughness: 0.22, metalness: 0.55 }),
+      new THREE.MeshStandardMaterial({ color: emberColor(0.06), roughness: 0.22, metalness: 0.55 }),
     );
     pool.rotation.x = -Math.PI / 2;
     pool.position.y = WATER_Y - 0.02;
@@ -256,64 +308,77 @@ export const waterSlide: SceneModule = {
     pivot.rotation.y += dt * SPIN;
 
     const hue = drift(t);
+    duckMat.color.copy(ember(color, 0.82, hue));
+    beakMat.color.copy(ember(color, 0.44, hue));
+
     const base = t / PERIOD;
 
     for (let i = 0; i < TOTAL; i++) {
       const b = i * 5;
-      const lane = LANES[drops[b]];
-      const s = frac(base + drops[b + 1]);
-      const jr = drops[b + 2];
-      const jy = drops[b + 3];
-      let scale = drops[b + 4];
-      let n: number;
+      const lane = LANES[ducks[b]];
+      const s = frac(base + ducks[b + 1]);
+      const jr = ducks[b + 2];
+      const wob = ducks[b + 3] * TAU;
 
       if (s < S_EXIT) {
-        // 樋の中。u は下へ行くほど速く進むので、束は流れながら伸びる
+        // 樋の中。u は下へ行くほど速く進むので、列は流れながら伸びる
         const u = Math.pow(s / S_EXIT, GLIDE_EASE);
         const a = lane.phase + u * lane.turns * TAU;
         // 速いほど外側の壁へ寄る
-        const r = lane.r0 + (lane.r1 - lane.r0) * u + jr * TUBE_R * 0.44 + u * u * 0.24;
+        const r = lane.r0 + (lane.r1 - lane.r0) * u + jr * TUBE_R * 0.15 + u * u * 0.24;
         dummy.position.set(
           Math.cos(a) * r,
-          TOP + (EXIT_Y - TOP) * u - TUBE_R * 0.42 + jy * TUBE_R * 0.34,
+          TOP + (EXIT_Y - TOP) * u + RIDE_Y,
           Math.sin(a) * r,
         );
-        n = 0.46 + 0.24 * u;
+        // 進行方向を向きながら、舟のように左右へゆれる
+        dummy.rotation.set(
+          Math.sin(u * 11 + wob) * WOBBLE * 0.4,
+          -a + Math.sin(u * 8 + wob) * WOBBLE * 0.7,
+          Math.sin(u * 13 + wob) * WOBBLE,
+        );
       } else {
-        // 出口から水平に放り出され、加速しながら水面へ落ちる
+        // 出口から放り出され、加速しながら水面へ落ちて、くぐって消える
         const q = (s - S_EXIT) / (1 - S_EXIT);
         const a = lane.phase + lane.turns * TAU;
-        const r = lane.r1 + jr * TUBE_R * 0.44;
-        const fly = q * FALL_SPREAD;
+        const r = lane.r1 + jr * TUBE_R * 0.15;
+        const fly = Math.min(q / SPLASH_Q, 1) * FALL_SPREAD;
+        // 水面までは放物線、そこから先はゆっくり沈む。
+        // 水面を切っている間は体の下半分が水面に隠れて「浮いている」ように見える
+        const y =
+          q < SPLASH_Q
+            ? EXIT_Y * (1 - (q / SPLASH_Q) ** 2) + RIDE_Y * (1 - q / SPLASH_Q)
+            : -SINK * ((q - SPLASH_Q) / (1 - SPLASH_Q)) ** 2;
         dummy.position.set(
           Math.cos(a) * r - Math.sin(a) * fly,
-          EXIT_Y + (WATER_Y - EXIT_Y) * q * q,
+          WATER_Y + y,
           Math.sin(a) * r + Math.cos(a) * fly,
         );
-        n = 0.7 + 0.22 * q;
-        if (q > FADE_AT) scale *= Math.max(0, (1 - q) / (1 - FADE_AT));
+        // 前のめりに落ちる。水面を切ったらその姿勢のまま沈む
+        dummy.rotation.set(-Math.min(q / SPLASH_Q, 1) * 0.7, -a, Math.sin(wob) * WOBBLE * 0.5);
       }
 
-      dummy.scale.setScalar(scale);
+      dummy.scale.setScalar(ducks[b + 4]);
       dummy.updateMatrix();
-      dropMesh.setMatrixAt(i, dummy.matrix);
-      ember(color, n, hue, 0.1);
-      dropMesh.setColorAt(i, color);
+      for (const part of parts) part.setMatrixAt(i, dummy.matrix);
     }
-    dropMesh.instanceMatrix.needsUpdate = true;
-    if (dropMesh.instanceColor) dropMesh.instanceColor.needsUpdate = true;
+    for (const part of parts) part.instanceMatrix.needsUpdate = true;
 
-    // 波紋。束の位相が 0 に戻った瞬間＝その束が着水した瞬間
-    for (let i = 0; i < RINGS; i++) {
-      const age = frac(base + clusterOff[i]);
+    // 波紋。列の位相が着水の位相をまたぐ瞬間に合わせ、輪を少しずつ遅らせて重ねる
+    dummy.rotation.set(0, 0, 0);
+    for (let i = 0; i < RINGS * RING_WAVES; i++) {
+      const ring = Math.floor(i / RING_WAVES);
+      const wave = i % RING_WAVES;
+      const age = frac(base + clusterOff[ring] + SPLASH_LEAD - wave * RING_GAP);
       const k = age / RING_LIFE;
       const live = k < 1;
-      dummy.position.set(splash[i * 2], WATER_Y + 0.03, splash[i * 2 + 1]);
-      dummy.scale.setScalar(live ? 1 + k * RING_R : 0);
+      dummy.position.set(splash[ring * 2], WATER_Y + 0.03, splash[ring * 2 + 1]);
+      dummy.scale.setScalar(live ? 0.35 + k * RING_R : 0);
       dummy.updateMatrix();
       ringMesh.setMatrixAt(i, dummy.matrix);
-      const fade = live ? (1 - k) * (1 - k) : 0;
-      ember(color, 0.58, hue).multiplyScalar(fade);
+      // 着水は見せ場なので、内側の 1 本をいちばん明るくする
+      const fade = live ? (1 - k) * (1 - k) * (1 - wave * 0.3) : 0;
+      ember(color, 0.72, hue).multiplyScalar(fade);
       ringMesh.setColorAt(i, color);
     }
     ringMesh.instanceMatrix.needsUpdate = true;
@@ -326,7 +391,7 @@ export const waterSlide: SceneModule = {
 
     const base = t / PERIOD;
     for (let i = 0; i < RINGS; i++) {
-      for (let k = ticks[i](base + clusterOff[i]); k > 0; k--) {
+      for (let k = ticks[i](base + clusterOff[i] + SPLASH_LEAD); k > 0; k--) {
         step++;
         const lane = Math.floor(i / CLUSTERS);
         sfx.drop(tone(4 + lane * 2 + (step % 3)), {
