@@ -4,12 +4,12 @@ import { tone } from '../audio.ts';
 import { SURFACE, ember, drift } from '../palette.ts';
 
 /**
- * 何が動くか: 面にルーンを刻んだ 10 個の 10 面ダイスが上空からまとめて撒かれ、床で跳ねながら
- *   歩幅を縮めて転がり、てんでばらばらの向きで止まる。止まると上を向いた面だけがじわりと灯り、
+ * 何が動くか: 面にルーンを刻んだ 10 個の 10 面ダイスが、画面の左手前から卓へ一斉に投げ入れられ、
+ *   低い弧を描いて跳ねながら歩幅を縮めて転がり、ばらばらの向きで止まる。止まると上を向いた面が灯り、
  *   そこに彫られたルーンが影として浮かぶ。しばらく結果を見せてから床へ沈み、次の一投が始まる。
  * 気持ちよさの芯: 10 個が一斉に散って、跳ねる幅が縮みながら止まっていく「ばらけ方」。
  *   どこに何個固まるか、どの面が上に来るかが毎回読めない。
- * ループの周期: 1 投 8 秒（撒く 0.9 秒 → 跳ねて転がる 2.5 秒 → 灯って見せる 3.6 秒 → 沈む 0.9 秒）。
+ * ループの周期: 1 投 8 秒（投げ入れ 0.7 秒 → 跳ねて転がる 2.7 秒 → 灯って見せる 3.7 秒 → 沈む 0.9 秒）。
  *   沈みきる時刻と次の投げの始まりを突き合わせてあるので、何も居ないフレームが挟まらない。
  * カメラ: やや高い斜め上から。転がる軌跡と上を向いた面の両方が見える角度。
  * 音: 最初の着地と二跳ね目に pluck（半分のダイスだけ）、止まる瞬間に drop。音程は出目で変わる。
@@ -29,15 +29,20 @@ const SPREAD = 6.0; // 止まる位置の散らばり半径
 const MIN_GAP = 2.35; // ダイス同士の最短距離。これ未満なら押し離す
 const FLOOR_R = 9.6; // 床の半径。ダイスの散らばりより一回り広いだけにして「台」として読ませる
 const PERIOD = 8.0; // 一投の秒数
-const THROW_SPAN = 0; // 手を離れる時刻のばらつき。0 なら文字どおり一斉に撒かれる
-const START_Y = 4.8; // 撒かれる高さ。上端を突き抜けないところまで下げてある
-const START_R = 1.0; // 撒かれた瞬間の塊の広がり
+const THROW_SPAN = 0.42; // 手を離れる時刻のばらつき。先行が着く頃に後続が離れ、軌道上に伸びる
+const THROW_X = -6.0; // 投げ入れ口。床の外、カメラから見て左手前の低いところ
+const THROW_Z = 4.0;
+const THROW_Y = 3.4; // 手を離れる高さ。振りかぶった手の高さくらい
+const THROW_V0 = 1.3; // 手を離れた瞬間の上向きの速さ。少し放り上げてから落ちる
+const THROW_ALONG = 1.9; // 手を離れた瞬間の散らばり（投げ込む向きに沿った長さ）
+const THROW_ACROSS = 1.0; // 同、それに直交する向きの幅。狭いと団子に見えるので沿う向きを長く取る
+const THROW_RISE = 1.0; // 同、高さのばらつき。横へ広げると画面の端に掛かるので、縦で散らす
 const ROLL_MIN = 3.0; // 手を離れてから止まるまで
 const ROLL_VAR = 0.7;
-const FALL_FRAC = 0.26; // そのうち最初の着地までの割合
-const BOUNCES = 4; // 着地後に跳ねる回数
-const BOUNCE_RATIO = 0.62; // 一跳ねごとに滞空時間と歩幅にかかる比
-const SPIN_A = 16; // 転がり全体の回転量（主軸）
+const FALL_FRAC = 0.2; // そのうち最初の着地までの割合。低く速く飛ばすほど横投げに見える
+const BOUNCES = 5; // 着地後に跳ねる回数
+const BOUNCE_RATIO = 0.66; // 一跳ねごとに滞空時間と歩幅にかかる比
+const SPIN_A = 19; // 転がり全体の回転量（主軸）
 const SPIN_B = 9; // 同（副軸。減衰が速いので跳ねている間だけ効く）
 const GLOW_RISE = 0.34; // 止まってから上面が灯りきるまで
 const SINK_AT = 7.0; // 沈み始める時刻
@@ -54,6 +59,11 @@ const RUNE_W = 0.1; // 刻線の太さ。細いと、灯った面のブルーム
 const RUNE_LIFT = 0.016; // 面から浮かせる量。これで線が面と z 争いを起こさない
 const RUNE_DARK = 0.34; // 刻線を面よりどれだけ暗くするか（彫り跡の影）
 const RUNE_LIT = 0.03; // 灯った面の上で刻線を持ち上げる量。ほぼ上げないことで字が影として残る
+
+// 投げ入れ口から卓の中心へ向かう単位ベクトル。塊をこの向きに伸ばす。
+const THROW_LEN = Math.hypot(THROW_X, THROW_Z);
+const THROW_DX = -THROW_X / THROW_LEN;
+const THROW_DZ = -THROW_Z / THROW_LEN;
 
 const UP = new THREE.Vector3(0, 1, 0);
 const nWorld = new THREE.Vector3();
@@ -205,6 +215,7 @@ interface Die {
   colors: THREE.BufferAttribute;
   runes: THREE.BufferAttribute;
   sx: number;
+  sy: number;
   sz: number;
   fx: number;
   fz: number;
@@ -244,15 +255,17 @@ function roll(c: number): void {
     d.fx = Math.cos(a) * rad;
     d.fz = Math.sin(a) * rad;
 
-    const sa = rng() * Math.PI * 2;
-    const sr = START_R * Math.sqrt(rng());
-    d.sx = Math.cos(sa) * sr;
-    d.sz = Math.sin(sa) * sr;
+    const along = (rng() - 0.5) * 2 * THROW_ALONG;
+    const across = (rng() - 0.5) * 2 * THROW_ACROSS;
+    d.sx = THROW_X + THROW_DX * along + THROW_DZ * across;
+    d.sz = THROW_Z + THROW_DZ * along - THROW_DX * across;
+    d.sy = THROW_Y + (rng() - 0.5) * 2 * THROW_RISE;
 
     d.t0 = rng() * THROW_SPAN;
     const span = ROLL_MIN + rng() * ROLL_VAR;
     d.tA = span * FALL_FRAC;
-    d.g = (2 * START_Y) / (d.tA * d.tA);
+    // 放り上げた分も含めて、ちょうど tA で床に降りてくる重力を逆算する。
+    d.g = (2 * (d.sy + THROW_V0 * d.tA)) / (d.tA * d.tA);
 
     // 残り時間を等比で刻む。滞空も歩幅も一跳ねごとに BOUNCE_RATIO 倍に縮む。
     const rest = span - d.tA;
@@ -312,8 +325,8 @@ function roll(c: number): void {
 
 /** 手を離れてから s 秒後の、床からの高さ。 */
 function heightAt(d: Die, s: number): number {
-  if (s <= 0) return START_Y;
-  if (s < d.tA) return START_Y - 0.5 * d.g * s * s;
+  if (s <= 0) return d.sy;
+  if (s < d.tA) return d.sy + THROW_V0 * s - 0.5 * d.g * s * s;
   let u = s - d.tA;
   for (let k = 0; k < BOUNCES; k++) {
     const seg = d.segs[k];
@@ -381,6 +394,7 @@ export const d10Toss: SceneModule = {
         colors,
         runes,
         sx: 0,
+        sy: THROW_Y,
         sz: 0,
         fx: 0,
         fz: 0,
