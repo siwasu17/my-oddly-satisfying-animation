@@ -7,12 +7,12 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
  * Liquid Orb。
  *
  * 何が動くか: 宙に浮いた液体の玉ひとつ。向きも細かさも違う 5 本の波を球面に重ねて
- * 表面を荒らし、その振幅を 8 秒かけて 0 へ落としていく。荒れが引いたあとには、
- * 継ぎ目もハイライトの途切れも無い完全な球だけが残る。
- * 気持ちよさの芯: うねりが「だんだん」収まっていく過程そのもの。前半で大きく凪ぎ、
- * 最後のわずかな揺れがゆっくり消えていくので、整いきった一瞬に静けさが来る。
- * ループの周期: 14 秒。整った球が内側からふくらみ、そのふくらみが表面へ抜けると
- * 再びうねり出す。振幅も波の位相も 14 秒ちょうどで閉じるため、継ぎ目は見えない。
+ * 表面を荒らす。最初の 4.7 秒は荒れたまま保ち、そこから 6.5 秒かけて振幅を 0 へ落とす。
+ * 荒れが引いたあとには、継ぎ目もハイライトの途切れも無い完全な球だけが残る。
+ * 気持ちよさの芯: うねりが「だんだん」収まっていく過程そのもの。最後のわずかな揺れが
+ * ゆっくり消えていくので、整いきった一瞬に静けさが来る。
+ * ループの周期: 18 秒。整った球が内側からふくらみ、そのふくらみが表面へ抜けると
+ * 再びうねり出す。振幅も波の位相も 18 秒ちょうどで閉じるため、継ぎ目は見えない。
  * カメラ: 水平よりわずかに上から、玉を正面に据える。
  * 音: うねりの強さに連れて濃くなる低いドローン。整った瞬間に澄んだ一音、
  * 内側からふくらむ瞬間に低い滴。
@@ -22,7 +22,7 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
 // ---- 調整する数値 ----------------------------------------------------------
 
 /** 1 周の秒数。うねりの位相もこの長さで閉じる。 */
-const LOOP = 14;
+const LOOP = 18;
 /** 球の分割。振幅を上げると 4 では輪郭に稜線が出るので 5（10242 頂点）まで上げてある。 */
 const DETAIL = 5;
 /** 基準半径 */
@@ -45,13 +45,26 @@ const WAVES = 5;
 /** 波の細かさ。6 を超えると表面が高周波になってちらつく。 */
 const FREQ = [2.1, 3.0, 4.2, 5.1, 6.0];
 /** 各波が LOOP の間に進む周回数。整数なので 1 周で必ず元の位相へ戻る。 */
-const SPIN = [1, -2, 3, -4, 5];
+const SPIN = [1, -3, 4, -5, 7];
 /** 波の混ぜ具合。細かい波ほど弱くして、大きなうねりを主役にする。 */
-const WEIGHT = [1, 0.8, 0.55, 0.4, 0.3];
+const WEIGHT = [1, 0.85, 0.62, 0.48, 0.36];
+/**
+ * 波ごとに、凪ぐときの消え始めを遅らせる量。全部を一律に落とすと、
+ * 途中でいちばん重い低次の波だけが残り、玉が角丸の四角のような
+ * 対称な形に収束してしまう。大きなうねりから先に引かせて、細かい波を
+ * 後に残すと、凪ぎの途中も形が読めないままでいられる。
+ */
+const FADE = [0.34, 0.26, 0.14, 0.06, 0];
 /** ここ（位相）で振幅が 0 になり、完全な球になる */
-const CALM_END = 0.56;
+const CALM_END = 0.62;
+/**
+ * 凪ぎに使う時間のうち、振幅をそのまま保つ区間の割合。ここが無いと
+ * 減衰カーブの性質上、序盤の 3 秒ほどで振幅が 1/4 まで落ちてしまい、
+ * 「うねっている」と見える時間が凪ぎ区間の見かけの長さより遥かに短くなる。
+ */
+const PLATEAU = 0.42;
 /** ここまで球のまま静止する */
-const HOLD_END = 0.7;
+const HOLD_END = 0.73;
 /** 内側から湧くときにふくらむ量（半径比） */
 const SWELL = 0.05;
 /** 整った瞬間に床へ抜ける波紋の本数 */
@@ -87,11 +100,13 @@ const smooth = (x: number): number => {
   return u * u * (3 - 2 * u);
 };
 
-/** うねりの強さ 0..1。前半で大きく凪ぎ、最後のわずかな揺れがゆっくり消える。 */
+/** うねりの強さ 0..1。しばらく荒れたまま保ち、そこから凪いで、最後の揺れがゆっくり消える。 */
 function ampAt(t: number): number {
   const u = (t / LOOP) % 1;
   if (u < CALM_END) {
-    const s = 1 - smooth(u / CALM_END);
+    const x = u / CALM_END;
+    if (x < PLATEAU) return 1;
+    const s = 1 - smooth((x - PLATEAU) / (1 - PLATEAU));
     return s * s;
   }
   if (u < HOLD_END) return 0;
@@ -110,6 +125,9 @@ function swellAt(t: number): number {
 // ---- 組み立て --------------------------------------------------------------
 
 const tmp = new THREE.Color();
+/** 毎フレーム書き換える作業用。update の中で配列を作らないための置き場。 */
+const spin = new Float32Array(WAVES);
+const kamp = new Float32Array(WAVES);
 
 /**
  * 暖色の環境マップを 1 枚その場で作る。ステージには環境マップが無く、拡散光だけだと
@@ -125,7 +143,7 @@ function makeEnv(): THREE.DataTexture {
   for (let y = 0; y < H; y++) {
     const v = y / (H - 1);
     const band =
-      0.95 * Math.exp(-((v - 0.3) ** 2) / 0.0016) + 0.4 * Math.exp(-((v - 0.52) ** 2) / 0.0009);
+      0.78 * Math.exp(-((v - 0.3) ** 2) / 0.0016) + 0.36 * Math.exp(-((v - 0.52) ** 2) / 0.0009);
     for (let x = 0; x < W; x++) {
       // 帯に緩い濃淡を付けて、反射が一様な輪にならないようにする
       const sway = 0.76 + 0.24 * Math.sin((x / W) * Math.PI * 6 + 1.2);
@@ -190,7 +208,7 @@ function weld(src: THREE.BufferGeometry): THREE.BufferGeometry {
 export const liquidOrb: SceneModule = {
   name: 'Liquid Orb',
   desc: 'うねる液体の玉が、ゆっくり凪いで継ぎ目のない球になる',
-  camera: { pos: [0, 8.1, 28.5], target: [0, CENTER_Y + 0.9, 0] },
+  camera: { pos: [0, 8.1, 28.5], target: [0, CENTER_Y + 0.5, 0] },
 
   build(root) {
     settleTick = ticker();
@@ -245,14 +263,14 @@ export const liquidOrb: SceneModule = {
     const shift = drift(t);
 
     // 波の位相。LOOP で整数周するので、ループの継ぎ目で形が飛ばない。
-    const spin: number[] = [];
     for (let k = 0; k < WAVES; k++) {
-      spin.push((SPIN[k] * 2 * Math.PI * t) / LOOP + PHASE[k]);
+      spin[k] = (SPIN[k] * 2 * Math.PI * t) / LOOP + PHASE[k];
+      kamp[k] = WEIGHT[k] * clamp01((amp - FADE[k]) / (1 - FADE[k]));
     }
 
     const pos = geo.getAttribute('position') as THREE.BufferAttribute;
     const scale = R * (1 + swell * SWELL);
-    const reach = amp * AMP;
+    const reach = AMP;
     for (let i = 0; i < pos.count; i++) {
       const nx = base[i * 3] / R;
       const ny = base[i * 3 + 1] / R;
@@ -260,7 +278,7 @@ export const liquidOrb: SceneModule = {
       let w = 0;
       for (let k = 0; k < WAVES; k++) {
         const d = DIRS[k * 3] * nx + DIRS[k * 3 + 1] * ny + DIRS[k * 3 + 2] * nz;
-        w += WEIGHT[k] * Math.sin(FREQ[k] * d + spin[k]);
+        w += kamp[k] * Math.sin(FREQ[k] * d + spin[k]);
       }
       const r = scale * (1 + reach * (w / NORM));
       pos.setXYZ(i, nx * r, ny * r, nz * r);
