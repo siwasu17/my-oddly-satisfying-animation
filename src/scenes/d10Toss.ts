@@ -1,14 +1,15 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
 import { tone } from '../audio.ts';
-import { SURFACE, ember, drift } from '../palette.ts';
+import { SURFACE, ember, emberColor, drift } from '../palette.ts';
 
 /**
  * 何が動くか: 面にルーンを刻んだ 10 個の 10 面ダイスが、画面の左手前から卓へ一斉に投げ入れられ、
- *   低い弧を描いて跳ねながら歩幅を縮めて転がり、ばらばらの向きで止まる。止まると上を向いた面が灯り、
- *   そこに彫られたルーンが影として浮かぶ。しばらく結果を見せてから床へ沈み、次の一投が始まる。
- * 気持ちよさの芯: 10 個が一斉に散って、跳ねる幅が縮みながら止まっていく「ばらけ方」。
- *   どこに何個固まるか、どの面が上に来るかが毎回読めない。
+ *   低い弧を描いて跳ね、卓の縁に当たると跳ね返りながら歩幅を縮めて転がり、ばらばらの向きで止まる。
+ *   止まると上を向いた面が灯り、そこに彫られたルーンが影として浮かぶ。
+ *   しばらく結果を見せてから床へ沈み、次の一投が始まる。
+ * 気持ちよさの芯: 勢いよく放られた 10 個が縁で折り返しながら散り、歩幅を縮めて止まっていく「ばらけ方」。
+ *   どこで跳ね返るか、どこに何個固まるか、どの面が上に来るかが毎回読めない。
  * ループの周期: 1 投 8 秒（投げ入れ 0.7 秒 → 跳ねて転がる 2.7 秒 → 灯って見せる 3.7 秒 → 沈む 0.9 秒）。
  *   沈みきる時刻と次の投げの始まりを突き合わせてあるので、何も居ないフレームが挟まらない。
  * カメラ: やや高い斜め上から。転がる軌跡と上を向いた面の両方が見える角度。
@@ -25,9 +26,14 @@ const DICE = 10; // ダイスの個数
 const R = 1.0; // 赤道の半径
 const H = 1.18; // 上下の頂点までの高さ
 const M = H / 9.4721; // 赤道のジグザグの振れ幅。この比のときだけ 10 枚の凧形が平面になる
-const SPREAD = 7.4; // 止まる位置の散らばり半径
-const MIN_GAP = 2.35; // ダイス同士の最短距離。これ未満なら押し離す
-const FLOOR_R = 10.8; // 床の半径。ダイスの散らばりより一回り広いだけにして「台」として読ませる
+const MIN_GAP = 2.35; // ダイス同士の最短距離。これ未満なら投げ直して重なりを避ける
+const FLOOR_R = 10.8; // 床の半径
+const WALL_R = 9.4; // ダイスの中心がここを越えると縁で跳ね返る。床の内側に取る
+const RIM_H = 0.8; // 卓の縁の高さ。跳ね返る理由が絵で分かるように立てておく
+const TRAVEL_MIN = 12.0; // 手を離れてから止まるまでに、床を這って進む距離
+const TRAVEL_VAR = 5.5;
+const SPRAY = 0.44; // 投げ込む向きから左右へ散らす角度（ラジアン）
+const WALL_MAX = 4; // 1 投で跳ね返る回数の上限。無限ループにしないための蓋
 const PERIOD = 8.0; // 一投の秒数
 const THROW_SPAN = 0.42; // 手を離れる時刻のばらつき。先行が着く頃に後続が離れ、軌道上に伸びる
 const THROW_X = -5.2; // 投げ入れ口。床の外、カメラから見て左手前の低いところ
@@ -219,6 +225,9 @@ interface Die {
   sz: number;
   fx: number;
   fz: number;
+  dirX: number; // 投げ込む向き（単位ベクトル）
+  dirZ: number;
+  travel: number; // 止まるまでに進む道のり。縁で折り返しても長さは変わらない
   t0: number; // 手を離れる時刻
   tA: number; // 最初の着地までの時間
   dur: number; // 止まるまでの時間
@@ -249,11 +258,13 @@ function roll(c: number): void {
 
   for (let i = 0; i < DICE; i++) {
     const d = dice[i];
-    // 角度を 10 等分した持ち場にジッタを足す。少ない乱数でも片側に寄らない。
-    const a = ((i + 0.5 + (rng() - 0.5) * 0.8) / DICE) * Math.PI * 2;
-    const rad = SPREAD * Math.sqrt(0.08 + 0.92 * rng());
-    d.fx = Math.cos(a) * rad;
-    d.fz = Math.sin(a) * rad;
+    // 投げ込む向きは、卓の中心へ向かう向きから左右へ散らす。
+    const spray = (rng() - 0.5) * 2 * SPRAY;
+    const cs = Math.cos(spray);
+    const sn = Math.sin(spray);
+    d.dirX = THROW_DX * cs - THROW_DZ * sn;
+    d.dirZ = THROW_DX * sn + THROW_DZ * cs;
+    d.travel = TRAVEL_MIN + rng() * TRAVEL_VAR;
 
     const along = (rng() - 0.5) * 2 * THROW_ALONG;
     const across = (rng() - 0.5) * 2 * THROW_ACROSS;
@@ -283,6 +294,23 @@ function roll(c: number): void {
     d.dur = dur;
     d.total = total;
 
+    // 止まる場所は軌道の計算結果になる。先に決まった相手と重なるなら、少し長く投げて
+    // 別の場所へ送る。縁で折り返すぶん、道のりが伸びると行き先が大きく変わる。
+    for (let k = 0; k < 14; k++) {
+      horizAt(d, d.dur);
+      d.fx = hp.x;
+      d.fz = hp.z;
+      let clear = true;
+      for (let j = 0; j < i; j++) {
+        if (Math.hypot(d.fx - dice[j].fx, d.fz - dice[j].fz) < MIN_GAP) {
+          clear = false;
+          break;
+        }
+      }
+      if (clear) break;
+      d.travel += MIN_GAP * 0.66;
+    }
+
     d.face = Math.floor(rng() * 10) % 10;
     d.tint = TINT_MIN + rng() * TINT_VAR;
     d.sinkDelay = rng() * SINK_DELAY;
@@ -295,32 +323,6 @@ function roll(c: number): void {
     d.qFinal.copy(qb).multiply(qa);
   }
 
-  // 重なって止まらないように押し離す。転がってぶつかった結果のように見せたいので弱めに。
-  for (let pass = 0; pass < 5; pass++) {
-    for (let i = 0; i < DICE; i++) {
-      for (let j = i + 1; j < DICE; j++) {
-        const a = dice[i];
-        const b = dice[j];
-        const dx = b.fx - a.fx;
-        const dz = b.fz - a.fz;
-        const dist = Math.hypot(dx, dz);
-        if (dist >= MIN_GAP || dist < 1e-4) continue;
-        const push = (MIN_GAP - dist) * 0.5;
-        a.fx -= (dx / dist) * push;
-        a.fz -= (dz / dist) * push;
-        b.fx += (dx / dist) * push;
-        b.fz += (dz / dist) * push;
-      }
-    }
-  }
-  for (let i = 0; i < DICE; i++) {
-    const d = dice[i];
-    const dist = Math.hypot(d.fx, d.fz);
-    if (dist > SPREAD) {
-      d.fx = (d.fx / dist) * SPREAD;
-      d.fz = (d.fz / dist) * SPREAD;
-    }
-  }
 }
 
 /** 手を離れてから s 秒後の、床からの高さ。 */
@@ -334,6 +336,75 @@ function heightAt(d: Die, s: number): number {
     u -= seg;
   }
   return 0;
+}
+
+/**
+ * 内側の点 (px, pz) から向き (dx, dz) へ進んだとき、縁に届くまでの距離。届かなければ -1。
+ * |p + t*d| = WALL_R を解いた正の根。
+ */
+function wallHit(px: number, pz: number, dx: number, dz: number): number {
+  const b = px * dx + pz * dz;
+  const disc = b * b - (px * px + pz * pz - WALL_R * WALL_R);
+  if (disc <= 0) return -1;
+  const t = -b + Math.sqrt(disc);
+  return t > 1e-6 ? t : -1;
+}
+
+/** 水平位置の計算結果を受け取る使い回し。毎フレーム new しない。 */
+const hp = { x: 0, z: 0 };
+
+/**
+ * 手を離れてから s 秒後の水平位置。進んだ道のりを縁で折り返しながら消費する。
+ * 前フレームからの差分を積まないので、どの時刻から見ても同じ軌道になる。
+ */
+function horizAt(d: Die, s: number): void {
+  const prog = progressAt(d, s);
+  const air = d.tA / d.total; // 最初の着地までの進み具合
+  let px = d.sx;
+  let pz = d.sz;
+  let dx = d.dirX;
+  let dz = d.dirZ;
+
+  // 投げ入れ口は卓の外なので、飛んでいる間は縁より高いところを通る。ここでは折り返さない。
+  const flown = d.travel * Math.min(prog, air);
+  px += dx * flown;
+  pz += dz * flown;
+
+  let remain = d.travel * Math.max(0, prog - air);
+  if (remain <= 1e-6) {
+    hp.x = px;
+    hp.z = pz;
+    return;
+  }
+
+  // 着地点が縁の外へ流れていたら内側へ寄せる。以降の折り返しは内側からの計算になる。
+  const drop = Math.hypot(px, pz);
+  if (drop > WALL_R) {
+    const k = (WALL_R * 0.97) / drop;
+    px *= k;
+    pz *= k;
+  }
+
+  for (let k = 0; k <= WALL_MAX && remain > 1e-6; k++) {
+    const hit = wallHit(px, pz, dx, dz);
+    if (hit < 0 || hit >= remain) {
+      px += dx * remain;
+      pz += dz * remain;
+      break;
+    }
+    px += dx * hit;
+    pz += dz * hit;
+    remain -= hit;
+    // 縁の法線で折り返す。入射角と反射角がそろうので、跳ね返りとして読める。
+    const inv = 1 / Math.hypot(px, pz);
+    const nx = px * inv;
+    const nz = pz * inv;
+    const dot = dx * nx + dz * nz;
+    dx -= 2 * dot * nx;
+    dz -= 2 * dot * nz;
+  }
+  hp.x = px;
+  hp.z = pz;
 }
 
 /** 同じく、撒かれた地点から止まる地点までの進み具合 0..1。 */
@@ -367,6 +438,29 @@ export const d10Toss: SceneModule = {
     floor.position.y = -0.02;
     root.add(floor);
 
+    // 卓の縁。ダイスが跳ね返る位置（WALL_R + ダイスの半径）にちょうど内面が来る。
+    const rim = new THREE.Mesh(
+      new THREE.CylinderGeometry(WALL_R + R, WALL_R + R, RIM_H, 96, 1, true),
+      new THREE.MeshStandardMaterial({
+        // 床と同じ色にすると暗い背景に溶けて、跳ね返る壁があると分からない。
+        color: emberColor(0.14),
+        roughness: 0.5,
+        metalness: 0.3,
+        side: THREE.DoubleSide,
+      }),
+    );
+    rim.position.y = RIM_H / 2 - 0.02;
+    root.add(rim);
+
+    // 縁の上端をなぞる細い明るい輪。これが卓の輪郭線になる。
+    const lip = new THREE.Mesh(
+      new THREE.TorusGeometry(WALL_R + R, 0.07, 8, 96),
+      new THREE.MeshStandardMaterial({ color: emberColor(0.27), roughness: 0.45, metalness: 0.35 }),
+    );
+    lip.rotation.x = -Math.PI / 2;
+    lip.position.y = RIM_H - 0.02;
+    root.add(lip);
+
     const mat = new THREE.MeshStandardMaterial({
       vertexColors: true,
       flatShading: true,
@@ -398,6 +492,9 @@ export const d10Toss: SceneModule = {
         sz: 0,
         fx: 0,
         fz: 0,
+        dirX: THROW_DX,
+        dirZ: THROW_DZ,
+        travel: TRAVEL_MIN,
         t0: 0,
         tA: 1,
         dur: 3,
@@ -436,9 +533,9 @@ export const d10Toss: SceneModule = {
         // 前の一投の続き。床下に隠したまま次の出番を待つ。
         d.mesh.position.set(d.fx, -SINK_DEPTH, d.fz);
       } else {
-        const p = progressAt(d, s);
+        horizAt(d, s);
         const y = REST_Y + heightAt(d, s) - SINK_DEPTH * Math.pow(sink, 1.8);
-        d.mesh.position.set(d.sx + (d.fx - d.sx) * p, y, d.sz + (d.fz - d.sz) * p);
+        d.mesh.position.set(hp.x, y, hp.z);
 
         const left = Math.max(0, 1 - s / d.dur);
         qa.setFromAxisAngle(d.axA, SPIN_A * Math.pow(left, 1.7));
@@ -495,7 +592,7 @@ export const d10Toss: SceneModule = {
 
     for (let i = 0; i < DICE; i++) {
       const d = dice[i];
-      const pan = Math.max(-1, Math.min(1, d.fx / SPREAD));
+      const pan = Math.max(-1, Math.min(1, d.fx / WALL_R));
       const hit = d.t0 + d.tA;
       if (i % 2 === 0 && prev < hit && local >= hit) {
         sfx.pluck(tone(6 + (d.face % 5)), { gain: 0.34, decay: 1.3, pan });
