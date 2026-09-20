@@ -62,8 +62,14 @@ const FALL_SPREAD = 1.8;
 const WOBBLE = 0.17;
 /** 樋の中での浮き沈みの深さ。水に浮いているように見せる */
 const BOB = 0.13;
-/** 樋の中で左右へ流される幅（樋の半径に対する比） */
-const SWAY = 0.22;
+/** 樋の中で左右へ揺れる幅。樋の縁とアヒルの幅の差ぶんしか動く余地が無い */
+const SWAY = 0.15;
+/**
+ * 左右のゆれ・浮き沈みの回数（ループあたり）。一匹ごとの速さ倍率が掛かる。
+ * 進み具合ではなく経過時間で回す。u で回すと樋の上のほうでは止まって見えてしまう。
+ */
+const SWAY_F = 6;
+const BOB_F = 8;
 /** 波紋が広がりきるまでのループ位相。沈んでいく時間と揃えないと輪だけが残る */
 const RING_LIFE = 0.14;
 /** 波紋の最大半径 */
@@ -74,6 +80,11 @@ const RING_WAVES = 3;
 const RING_GAP = 0.02;
 /** 全体がゆっくり回る速さ（ラジアン／秒） */
 const SPIN = 0.016;
+/**
+ * 大きさ 1 のアヒルの頭のてっぺんの高さ。沈みきったかの判定に使う。
+ * 前のめりに倒れているぶん実際はこれより低いので、少し高めに見ておけば安全。
+ */
+const DUCK_TOP = 1.4;
 /** 樋の長さ方向・断面方向の分割数 */
 const TROUGH_SEG = 200;
 const TROUGH_ARC = 12;
@@ -93,14 +104,25 @@ const LANES: Lane[] = [
 
 const TAU = Math.PI * 2;
 const TOTAL = LANES.length * PER_LANE;
-const RINGS = LANES.length * CLUSTERS;
+const CLUSTER_N = LANES.length * CLUSTERS;
 
 /** 樋の中でアヒルが座る高さ。樋の底に浮かせる */
 const RIDE_Y = DUCK_R * 0.8 - TUBE_R;
-/** 着水するループ位相。1 との差だけ波紋と音を前倒しする */
-const SPLASH_LEAD = 1 - (S_EXIT + SPLASH_Q * (1 - S_EXIT));
+/** 着水するループ位相 */
+const S_SPLASH = S_EXIT + SPLASH_Q * (1 - S_EXIT);
+/** 1 との差だけ波紋と音を前倒しする */
+const SPLASH_LEAD = 1 - S_SPLASH;
 
 const frac = (x: number): number => x - Math.floor(x);
+
+/**
+ * 樋の中の左右のゆれ（-1..1）と、それを樋の中の横ずれに直したもの。
+ * 着水地点を build で先に求めるため、update と同じ式をここに 1 つだけ置く。
+ */
+const swayAt = (s: number, spd: number, sway: number): number =>
+  Math.sin(s * TAU * SWAY_F * spd + sway);
+const lateralAt = (w: number, jr: number, amp: number): number =>
+  (jr * 0.25 + w * amp * 0.8) * SWAY;
 
 const dummy = new THREE.Object3D();
 dummy.rotation.order = 'YXZ'; // 進行方向を向けてから、その軸まわりに傾ける
@@ -113,10 +135,10 @@ const color = new THREE.Color();
  */
 const DUCK_STRIDE = 8;
 const ducks = new Float32Array(TOTAL * DUCK_STRIDE);
-/** 列ごとのループ位相のずれ。波紋と着水音もこれに乗る */
-const clusterOff = new Float32Array(RINGS);
-/** 列ごとの着水地点 [x, z] */
-const splash = new Float32Array(RINGS * 2);
+/** 列ごとのループ位相のずれ */
+const clusterOff = new Float32Array(CLUSTER_N);
+/** アヒルごとの着水地点 [x, z]。波紋と着水音はこの一匹ずつに紐づく */
+const splash = new Float32Array(TOTAL * 2);
 
 let pivot: THREE.Group;
 /** 体・頭・くちばし・尾。4 つとも同じ姿勢行列を共有する */
@@ -125,7 +147,7 @@ let duckMat: THREE.MeshStandardMaterial;
 let beakMat: THREE.MeshStandardMaterial;
 let ringMesh: THREE.InstancedMesh;
 
-let ticks = tickers(RINGS);
+let ticks = tickers(TOTAL);
 let step = 0;
 
 /** らせんの u（0..1）の位置。樋のジオメトリとアヒルで同じ式を使う */
@@ -224,7 +246,7 @@ export const waterSlide: SceneModule = {
   camera: { pos: [0, 12.6, 26], target: [0, 4.8, 0] },
 
   build(root) {
-    ticks = tickers(RINGS);
+    ticks = tickers(TOTAL);
     step = 0;
 
     let seed = 0.731;
@@ -248,11 +270,11 @@ export const waterSlide: SceneModule = {
       pivot.add(new THREE.Mesh(troughGeometry(lane), troughMat));
     }
 
-    // 列は 9 つ。レーンをまたいで順ぐりに落ちるよう、位相を均等に配る
+    // 列はレーンをまたいで順ぐりに落ちるよう、位相を均等に配る
     for (let lane = 0; lane < LANES.length; lane++) {
       for (let c = 0; c < CLUSTERS; c++) {
         const i = lane * CLUSTERS + c;
-        clusterOff[i] = frac(c / CLUSTERS + lane / RINGS);
+        clusterOff[i] = frac(c / CLUSTERS + lane / CLUSTER_N);
       }
     }
 
@@ -289,14 +311,16 @@ export const waterSlide: SceneModule = {
       return mesh;
     });
 
-    // 着水地点。落下区間の式に水面を切る q を入れたもの
-    const p = new THREE.Vector3();
-    for (let i = 0; i < RINGS; i++) {
-      const lane = LANES[Math.floor(i / CLUSTERS)];
-      lanePoint(lane, 1, p);
+    // 着水地点。一匹ずつ、水面を切る位相 S_SPLASH のときの位置を先に解いておく。
+    // 列ではなく個体に紐づけないと、波紋と音が実際の着水から最大 1.8 秒ずれる
+    for (let i = 0; i < TOTAL; i++) {
+      const b = i * DUCK_STRIDE;
+      const lane = LANES[ducks[b]];
       const a = lane.phase + lane.turns * TAU;
-      splash[i * 2] = p.x - Math.sin(a) * FALL_SPREAD;
-      splash[i * 2 + 1] = p.z + Math.cos(a) * FALL_SPREAD;
+      const w = swayAt(S_SPLASH, ducks[b + 6], ducks[b + 7] * TAU);
+      const r = lane.r1 + lateralAt(w, ducks[b + 2], ducks[b + 5]) + 0.24;
+      splash[i * 2] = Math.cos(a) * r - Math.sin(a) * FALL_SPREAD;
+      splash[i * 2 + 1] = Math.sin(a) * r + Math.cos(a) * FALL_SPREAD;
     }
 
     const ringGeo = new THREE.RingGeometry(0.72, 1, 48);
@@ -310,7 +334,7 @@ export const waterSlide: SceneModule = {
         depthWrite: false,
         side: THREE.DoubleSide,
       }),
-      RINGS * RING_WAVES,
+      TOTAL * RING_WAVES,
     );
     ringMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     pivot.add(ringMesh);
@@ -347,61 +371,66 @@ export const waterSlide: SceneModule = {
       const spd = ducks[b + 6];
       const sway = ducks[b + 7] * TAU;
 
+      // ゆらゆら。樋にいる間も落ちている間も同じ式で回すので、出口で動きが途切れない
+      const swayW = swayAt(s, spd, sway);
+      const bobW = Math.sin(s * TAU * BOB_F * spd + wob);
+      // 左右への流され。樋の縁からはみ出す一歩手前で止まる幅にしてある
+      const lateral = lateralAt(swayW, jr, amp);
+      let size = ducks[b + 4];
+
       if (s < S_EXIT) {
         // 樋の中。u は下へ行くほど速く進むので、列は流れながら伸びる
         const u = Math.pow(s / S_EXIT, GLIDE_EASE);
         const a = lane.phase + u * lane.turns * TAU;
-        // 左右へゆっくり流される。u は下ほど速く進むので、
-        // 同じ式のままで下に行くほどゆれが速くなる
-        const lateral = jr * 0.45 + Math.sin(u * 7 * spd + sway) * 0.55 * amp;
         // 速いほど外側の壁へ寄る
-        const r = lane.r0 + (lane.r1 - lane.r0) * u + lateral * TUBE_R * SWAY + u * u * 0.24;
+        const r = lane.r0 + (lane.r1 - lane.r0) * u + lateral + u * u * 0.24;
         dummy.position.set(
           Math.cos(a) * r,
-          // 浮き沈み。ゆれとは別の周期にして、上下と左右が揃わないようにする
-          TOP + (EXIT_Y - TOP) * u + RIDE_Y + Math.sin(u * 9 * spd + wob) * BOB * amp,
+          // 浮き沈み。左右のゆれとは別の周期にして、上下と左右が揃わないようにする
+          TOP + (EXIT_Y - TOP) * u + RIDE_Y + bobW * BOB * amp,
           Math.sin(a) * r,
         );
-        // 進行方向を向きながら、舟のように左右へゆれる
+        // 進行方向を向きながら、舟のように左右へゆれる。
+        // 横へ寄るのと同じ位相で傾けると、水に押されて傾いたように見える
         dummy.rotation.set(
-          Math.sin(u * 11 * spd + wob) * WOBBLE * 0.5 * amp,
-          -a + Math.sin(u * 6 * spd + sway) * WOBBLE * 1.1 * amp,
-          Math.sin(u * 13 * spd + wob * 1.3) * WOBBLE * 1.35 * amp,
+          bobW * WOBBLE * 0.5 * amp,
+          -a + swayW * WOBBLE * 0.9 * amp,
+          swayW * WOBBLE * 1.6 * amp,
         );
       } else {
         // 出口から放り出され、加速しながら水面へ落ちて、そのまま潜って消える
         const q = (s - S_EXIT) / (1 - S_EXIT);
         const a = lane.phase + lane.turns * TAU;
-        const r = lane.r1 + jr * TUBE_R * 0.15;
+        const r = lane.r1 + lateral + 0.24;
         const fly = Math.min(q / SPLASH_Q, 1) * FALL_SPREAD;
         // 落下も沈下も同じ放物線のまま。水面で式を切り替えないので速度が途切れず、
-        // 着水で一度止まってから沈み直すような「水の抵抗」が出ない
-        const y = (EXIT_Y + RIDE_Y) * (1 - (q / SPLASH_Q) ** 2);
+        // 着水で一度止まってから沈み直すような「水の抵抗」が出ない。
+        // 高さの起点に浮き沈みを足しても、水面を切るのは必ず q === SPLASH_Q のまま
+        const y = (EXIT_Y + RIDE_Y + bobW * BOB * amp) * (1 - (q / SPLASH_Q) ** 2);
         dummy.position.set(
           Math.cos(a) * r - Math.sin(a) * fly,
           WATER_Y + y,
           Math.sin(a) * r + Math.cos(a) * fly,
         );
         // 前のめりに落ちる。水面を切ったらその姿勢のまま潜る
-        dummy.rotation.set(
-          -Math.min(q / SPLASH_Q, 1) * 0.7,
-          -a,
-          Math.sin(wob) * WOBBLE * 0.5 * amp,
-        );
+        dummy.rotation.set(-Math.min(q / SPLASH_Q, 1) * 0.7, -a, swayW * WOBBLE * 0.8 * amp);
+        // 頭まで水面の下へ入ったら消す。プールの円盤は手前の縁より深いところを
+        // 隠しきれず、そのままだと沈んだ体が縁の外側にはみ出して見えてしまう
+        if (y + DUCK_TOP * size < WATER_Y) size = 0;
       }
 
-      dummy.scale.setScalar(ducks[b + 4]);
+      dummy.scale.setScalar(size);
       dummy.updateMatrix();
       for (const part of parts) part.setMatrixAt(i, dummy.matrix);
     }
     for (const part of parts) part.instanceMatrix.needsUpdate = true;
 
-    // 波紋。列の位相が着水の位相をまたぐ瞬間に合わせ、輪を少しずつ遅らせて重ねる
+    // 波紋。一匹の位相が着水の位相をまたぐ瞬間に合わせ、輪を少しずつ遅らせて重ねる
     dummy.rotation.set(0, 0, 0);
-    for (let i = 0; i < RINGS * RING_WAVES; i++) {
+    for (let i = 0; i < TOTAL * RING_WAVES; i++) {
       const ring = Math.floor(i / RING_WAVES);
       const wave = i % RING_WAVES;
-      const age = frac(base + clusterOff[ring] + SPLASH_LEAD - wave * RING_GAP);
+      const age = frac(base + ducks[ring * DUCK_STRIDE + 1] + SPLASH_LEAD - wave * RING_GAP);
       const k = age / RING_LIFE;
       const live = k < 1;
       dummy.position.set(splash[ring * 2], WATER_Y + 0.03, splash[ring * 2 + 1]);
@@ -422,15 +451,15 @@ export const waterSlide: SceneModule = {
     sfx.drone(tone(-7), 0.05);
 
     const base = t / PERIOD;
-    for (let i = 0; i < RINGS; i++) {
-      for (let k = ticks[i](base + clusterOff[i] + SPLASH_LEAD); k > 0; k--) {
+    for (let i = 0; i < TOTAL; i++) {
+      const b = i * DUCK_STRIDE;
+      for (let k = ticks[i](base + ducks[b + 1] + SPLASH_LEAD); k > 0; k--) {
         step++;
-        const lane = Math.floor(i / CLUSTERS);
-        sfx.drop(tone(4 + lane * 2 + (step % 3)), {
-          gain: 0.34,
+        sfx.drop(tone(4 + ducks[b] * 2 + (step % 3)), {
+          gain: 0.3,
           decay: 0.8,
           bend: 0.62,
-          pan: Math.sin(i * 2.3) * 0.5,
+          pan: (splash[i * 2] / POOL_R) * 0.6,
         });
       }
     }
