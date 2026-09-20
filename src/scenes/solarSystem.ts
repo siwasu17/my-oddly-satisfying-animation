@@ -8,7 +8,6 @@ import { ember, emberColor, drift } from '../palette.ts';
  *
  * 何が動くか: 中心で脈打つ太陽と、それを囲む 5 つの惑星。惑星はそれぞれ傾いた軸で
  * 自転しながら楕円軌道を回り、衛星を従える。いちばん大きな惑星にはリングがある。
- * その内側を小惑星帯がゆっくり流れる。
  * 気持ちよさの芯: 公転周期を整数比にしていないので、手前を横切る順番と間隔が毎周ずれる。
  * 揃いそうで揃わないまま、重たい球がゆっくり回り続ける。
  * ループの周期: 最外周が一巡して 20 秒。内側の惑星はその間に何周もする。
@@ -20,8 +19,8 @@ import { ember, emberColor, drift } from '../palette.ts';
 
 // ---- 調整する数値はここにまとめる -------------------------------------------
 
-const CAM_POS: [number, number, number] = [4.5, 10, 28];
-const CAM_TARGET: [number, number, number] = [0, -1.4, 0]; // 俯瞰だと軌道面が下寄りに写るので、少し下を見る
+const CAM_POS: [number, number, number] = [3.9, 8.7, 24.4];
+const CAM_TARGET: [number, number, number] = [0, -1.2, 0]; // 俯瞰だと軌道面が下寄りに写るので、少し下を見る
 
 const SUN_R = 1.9; // 太陽の半径
 const SUN_PULSE = 0.018; // 太陽がふくらむ幅（半径比）
@@ -31,11 +30,6 @@ const CORONA = 1.55; // コロナの殻の大きさ（太陽半径比）
 const ORBIT_N = 5; // 惑星の数
 const ORBIT_SEG = 128; // 軌道線の分割数
 const ORBIT_LEVEL = 0.16; // 軌道線の明るさ（0..1）
-
-const BELT_COUNT = 68; // 小惑星の数。細かい粒を高密度で回すとちらつく
-const BELT_IN = 8.9; // 小惑星帯の内側
-const BELT_OUT = 9.9; // 小惑星帯の外側
-const BELT_TURN = 26; // 小惑星帯が一巡する秒数（外周ほど遅い）
 
 /** 惑星ごとの仕様。a = 軌道長半径 / flat = 楕円の潰し / r = 球の半径 */
 interface Planet {
@@ -64,7 +58,6 @@ const PLANETS: Planet[] = [
 
 // ---- 状態（build で作り直す） -----------------------------------------------
 
-const dummy = new THREE.Object3D();
 const color = new THREE.Color();
 
 let sun: THREE.Mesh;
@@ -77,9 +70,6 @@ const moonArms: THREE.Object3D[] = []; // 衛星を振り回す腕
 const moonSpec: number[] = []; // 腕ごとの [周期, 位相]
 const mats: THREE.MeshStandardMaterial[] = [];
 const pans: number[] = []; // 惑星の左右位置（音の定位に使う）
-
-let belt: THREE.InstancedMesh;
-const beltData = new Float32Array(BELT_COUNT * 4); // [半径, 位相, 高さ, 大きさ]
 
 let ticks: ((phase: number) => number)[] = [];
 
@@ -217,30 +207,6 @@ export const solarSystem: SceneModule = {
         arm.add(moon);
       }
     }
-
-    // 小惑星帯。粒を小さく暗くして、主役の惑星より前に出ないようにする
-    const beltGroup = new THREE.Object3D();
-    beltGroup.rotation.set(0.04, 0, 0);
-    root.add(beltGroup);
-
-    belt = new THREE.InstancedMesh(
-      new THREE.IcosahedronGeometry(1, 0),
-      new THREE.MeshStandardMaterial({ roughness: 0.85, flatShading: true }),
-      BELT_COUNT,
-    );
-    belt.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    beltGroup.add(belt);
-
-    for (let i = 0; i < BELT_COUNT; i++) {
-      const k = i * 4;
-      beltData[k] = BELT_IN + (BELT_OUT - BELT_IN) * rnd();
-      beltData[k + 1] = rnd();
-      beltData[k + 2] = (rnd() - 0.5) * 0.5;
-      beltData[k + 3] = 0.1 + rnd() * 0.1;
-      ember(color, 0.2 + rnd() * 0.18);
-      belt.setColorAt(i, color);
-    }
-    if (belt.instanceColor) belt.instanceColor.needsUpdate = true;
   },
 
   update(t) {
@@ -271,19 +237,6 @@ export const solarSystem: SceneModule = {
           (t / moonSpec[arm * 2] + moonSpec[arm * 2 + 1]) * Math.PI * 2;
       }
     }
-
-    for (let i = 0; i < BELT_COUNT; i++) {
-      const k = i * 4;
-      const r = beltData[k];
-      // 外周ほど遅く回る。帯がほどけて、粒が同じ隊列を組まない
-      const ang = (t / (BELT_TURN * (r / BELT_IN)) + beltData[k + 1]) * Math.PI * 2;
-      dummy.position.set(r * Math.cos(ang), beltData[k + 2], r * 0.92 * Math.sin(ang));
-      dummy.rotation.set(ang * 1.7, ang * 2.3, 0);
-      dummy.scale.setScalar(beltData[k + 3]);
-      dummy.updateMatrix();
-      belt.setMatrixAt(i, dummy.matrix);
-    }
-    belt.instanceMatrix.needsUpdate = true;
   },
 
   sound(t, _dt, sfx) {
