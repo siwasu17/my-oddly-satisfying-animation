@@ -4,7 +4,7 @@ import { tone, tickers } from '../audio.ts';
 import { ember, emberColor, drift } from '../palette.ts';
 
 /**
- * 何が動くか: 7x7 の盤が 5 枚、広い間隔をあけて真上に積まれている。無地の立方体が
+ * 何が動くか: 7x7 の盤が 5 枚、広い間隔をあけて真上に積まれている。ガラスの立方体が
  *   盤の上を辺を軸にコトンと倒れて気まぐれな隣のマスへ移り、4〜6 手で立ち止まる。
  *   止まった立方体はその場で盤に沈み、暗がりをゆっくり通って、一段下の盤の同じ位置へ
  *   降りてくる。最下段まで降りたものは暗がりを抜けて最上段の上から戻ってくる。
@@ -15,6 +15,9 @@ import { ember, emberColor, drift } from '../palette.ts';
  *   1 個が 5 段を降りて戻るまで 51 秒。30 個の位相を周期全体へ散らしてある。
  * カメラ: 水平から 28 度の斜俯瞰。段と段の空きから 5 枚すべての盤面が見える角度。
  * 音: 沈み始めに drop、下の盤へ着いたときに pluck（半分の立方体だけ）。段が下がるほど音程が低い。
+ * 素材: 立方体は黒曜石。角を落とさず稜線を立てたまま磨いた黒い鏡で、倒れるたびに
+ *   面の向きが変わって映り込みが切り替わる。厚みはほとんど光を通さず、薄いところだけ
+ *   赤が抜ける。盤のタイルはガラスで、こちらは縁を面取りして光らせている。
  * スコープ外: サイコロの目。
  *
  * 立方体どうしの重なりは、なわばりで分けるのではなく build で時間ごとにマスを予約して防ぐ。
@@ -42,12 +45,30 @@ const ROLL_OFF = 0.5; // 手の中で倒れ始める位相のばらつき。揃�
 const FADE = 0.46; // 沈み込みのうち、いちばん暗くなるまでの割合。0.5 に近づけるほど暗い間が短い
 const BACKTRACK = 0.16; // 来た道をそのまま引き返す確率
 const JITTER = 0.45; // 位相を均等割りからずらす幅（秒）
-const BODY_N = 0.42; // 立方体の色
-const BODY_VAR = 0.14;
-const TILE_N = 0.032; // 盤のタイルの色。暗く沈めて、上に載る立方体だけを見せる
+const BODY_N = 0.085; // 立方体の色。黒曜石なので素の色はほぼ黒く、映り込みだけで見せる
+const BODY_VAR = 0.05;
+const TILE_BEVEL = 0.035; // タイルの面取り幅。厚みが薄いので控えめに
+const BODY_TRANS = 0.16; // 立方体の透け具合。黒曜石なのでほとんど通さない
+const BODY_THICK = DIE * 0.9; // 透過の厚み。これで向こう側の歪み方が決まる
+const ATTEN_N = 0.4; // 厚みを通った光に乗る色
+const ATTEN_DIST = DIE * 0.3; // その色が乗りきるまでの距離。短くして厚みを黒く潰す
+const TILE_ALPHA = 0.86; // タイルの不透明度。盤は透かさず、表面の艶だけでガラスに見せる
+const ENV_SKY = 0.72; // 映り込ませる環境の、天頂の明るさ
+const ENV_FLOOR = 0.015; // 同じく足元の暗さ
+const ENV_HORIZON = 0.52; // 明暗の境目が来る高さ。ここが縁に映ると硝子らしくなる
+const ENV_BARS = 4; // 縦に走る明かりの帯の本数。角に沿って反射が流れる
+const ENV_BAR_N = 0.45; // 帯の明るさ
+const ENV_BAR_W = 0.028; // 帯の太さ（経度の割合）
+const ENV_HOT = 1.5; // 帯を白熱側へ寄せる強さ。黒曜石に走るハイライトはここで決まる
+const HOT = 0xffdfba; // その白熱の色。青を混ぜないよう、白ではなく灯りの色にしている
+const BODY_GAIN = 2.4; // 立方体に乗せる映り込みの強さ
+const TILE_GAIN = 0.45; // 盤に乗せる映り込みの強さ
+const TILE_N = 0.03; // 盤のタイルの色。暗く沈めて、上に載る立方体だけを見せる
 const TILE_VAR = 0.04;
 const EDGE_N = 0.15; // 盤の外周のライン
 const DARK = -0.26; // 沈むときに落とす明度。消しきらず、暗がりを降りる影が残る程度にする
+const GONE = -0.7; // ここまで暗くした立方体は、縮めて完全に消す
+const GONE_W = 0.25; // 消えきるまでの幅
 const SLOTS_PER_SEG = 36; // 予約表の時間の刻み。1 段ぶんをこの数に割る
 const TRIES = 240; // 経路を引き直す上限。7x7 に 30 個だとここまで要る
 
@@ -120,6 +141,124 @@ function veil(e: number): number {
   if (e < FADE) return smooth(e / FADE);
   if (e > 1 - FADE) return smooth((1 - e) / FADE);
   return 1;
+}
+
+/**
+ * ガラスに映り込ませるためだけの、その場で作る小さな環境。
+ *
+ * stage には環境マップが無い。映り込みが無いと roughness をいくら下げても
+ * 「つるつるした不透明な塊」にしか見えず、ガラスにならない。天頂を明るく、
+ * 縦に細い帯を何本か置いておくと、面取りした稜線に沿って光が流れる。
+ * build のたびに作り直さないよう、モジュール側に 1 枚だけ持つ。
+ */
+let envTex: THREE.DataTexture | null = null;
+function glassEnv(): THREE.DataTexture {
+  if (envTex) return envTex;
+  const w = 64;
+  const h = 32;
+  const data = new Uint8Array(w * h * 4);
+  const c = new THREE.Color();
+  const hot = new THREE.Color(HOT);
+  for (let y = 0; y < h; y++) {
+    const v = y / (h - 1); // 0 = 天頂
+    for (let x = 0; x < w; x++) {
+      const u = x / w;
+      // 水平線の上は明るく、下は落とす。境目をぼかしすぎると映り込みが濁る
+      const sky = smooth(clamp01((ENV_HORIZON - v) / 0.16 + 0.5));
+      const base = ENV_FLOOR + (ENV_SKY - ENV_FLOOR) * sky * (1 - v * 0.5);
+      let bar = 0;
+      for (let b = 0; b < ENV_BARS; b++) {
+        const du = Math.abs(((((u - (b + 0.35) / ENV_BARS) % 1) + 1.5) % 1) - 0.5);
+        bar += ENV_BAR_N * Math.exp(-(du * du) / (2 * ENV_BAR_W * ENV_BAR_W)) * sky;
+      }
+      // 帯だけは暖色帯の上限を越えて白熱側へ振る。ここが黒い面に走る鋭い光になる
+      ember(c, base + bar);
+      if (bar > 0.02) c.lerp(hot, clamp01(bar * ENV_HOT));
+      const i = (y * w + x) * 4;
+      data[i] = Math.round(c.r * 255);
+      data[i + 1] = Math.round(c.g * 255);
+      data[i + 2] = Math.round(c.b * 255);
+      data[i + 3] = 255;
+    }
+  }
+  envTex = new THREE.DataTexture(data, w, h);
+  envTex.mapping = THREE.EquirectangularReflectionMapping;
+  envTex.colorSpace = THREE.SRGBColorSpace;
+  envTex.needsUpdate = true;
+  return envTex;
+}
+
+/**
+ * 角も稜線も面取りした箱。
+ * 直角のままだと稜線が 1 本の線にしかならず、光が当たっても硬い樹脂に見える。
+ * 細く面取りしておくと、そこだけ環境の明かりを拾ってガラスの縁らしく光る。
+ */
+function bevelBox(w: number, h: number, d: number, r: number): THREE.BufferGeometry {
+  const hx = w / 2 - r;
+  const hz = d / 2 - r;
+  const shape = new THREE.Shape();
+  shape.moveTo(-hx + r, -hz);
+  shape.lineTo(hx - r, -hz);
+  shape.quadraticCurveTo(hx, -hz, hx, -hz + r);
+  shape.lineTo(hx, hz - r);
+  shape.quadraticCurveTo(hx, hz, hx - r, hz);
+  shape.lineTo(-hx + r, hz);
+  shape.quadraticCurveTo(-hx, hz, -hx, hz - r);
+  shape.lineTo(-hx, -hz + r);
+  shape.quadraticCurveTo(-hx, -hz, -hx + r, -hz);
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: h - 2 * r,
+    bevelEnabled: true,
+    bevelThickness: r,
+    bevelSize: r,
+    bevelOffset: 0,
+    bevelSegments: 2,
+    curveSegments: 3,
+  });
+  geo.translate(0, 0, -(h / 2 - r));
+  geo.rotateX(-Math.PI / 2);
+  return geo;
+}
+
+/**
+ * 立方体の黒曜石。火山ガラスなので素の色はほとんど黒く、見た目はほぼ映り込みでできている。
+ * transmission はわずかに残してあり、厚みのあるところは吸収されて黒く潰れ、
+ * 稜線のそばの薄いところだけ赤が抜ける。
+ * 色は instanceColor 側で足すので、ここでは白のままにしておく。
+ */
+function obsidianBody(): THREE.MeshPhysicalMaterial {
+  return new THREE.MeshPhysicalMaterial({
+    roughness: 0.03,
+    metalness: 0,
+    ior: 1.5,
+    transmission: BODY_TRANS,
+    thickness: BODY_THICK,
+    attenuationColor: emberColor(ATTEN_N),
+    attenuationDistance: ATTEN_DIST,
+    clearcoat: 1,
+    clearcoatRoughness: 0.02,
+    envMap: glassEnv(),
+    envMapIntensity: BODY_GAIN,
+  });
+}
+
+/**
+ * 盤のガラス。こちらは透過を使わない。
+ * transmission を使ったものどうしは互いに映らないので、盤まで透過にすると
+ * 立方体の中から盤が消えてしまう。盤は表面の艶と縁の面取りだけでガラスに見せる。
+ */
+function glassTile(): THREE.MeshPhysicalMaterial {
+  return new THREE.MeshPhysicalMaterial({
+    roughness: 0.14,
+    metalness: 0,
+    transparent: true,
+    opacity: TILE_ALPHA,
+    ior: 1.52,
+    clearcoat: 1,
+    clearcoatRoughness: 0.1,
+    envMap: glassEnv(),
+    envMapIntensity: TILE_GAIN,
+  });
 }
 
 /** 固定シードの乱数（mulberry32）。歩き方を決めるので、質の悪い LCG だと癖が出る。 */
@@ -351,7 +490,7 @@ function place(d: Die, seg: number, f: number): number {
 
 export const diceField: SceneModule = {
   name: 'Dice Field',
-  desc: '間を空けて積んだ 5 枚の盤。立方体は盤を歩き、立ち止まったところで一段下へ降りる。',
+  desc: '間を空けて積んだ 5 枚の盤。黒曜石の立方体が盤を歩き、立ち止まったところで一段下へ降りる。',
   camera: { pos: [10, 23.5, 26], target: [0, STACK_H * 0.55, 0] },
 
   build(root) {
@@ -361,8 +500,8 @@ export const diceField: SceneModule = {
 
     // ---- 盤。マスごとのタイルにして、目地で格子を見せる ----
     const tiles = new THREE.InstancedMesh(
-      new THREE.BoxGeometry(TILE, TILE_H, TILE),
-      new THREE.MeshStandardMaterial({ roughness: 0.82, metalness: 0.12 }),
+      bevelBox(TILE, TILE_H, TILE, TILE_BEVEL),
+      glassTile(),
       TIERS * CELLS,
     );
     const rnd = makeRng(0x7a1de5);
@@ -413,23 +552,28 @@ export const diceField: SceneModule = {
 
     // ---- 立方体 ----
     body = new THREE.InstancedMesh(
+      // 黒曜石は割れ口が鋭い。面取りすると角が丸く光ってただのガラス玉に寄るので、
+      // ここだけは素の立方体のまま稜線を立てておく
       new THREE.BoxGeometry(DIE, DIE, DIE),
-      new THREE.MeshStandardMaterial({ roughness: 0.46, metalness: 0.26 }),
+      obsidianBody(),
       dice.length,
     );
     body.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    body.renderOrder = 1; // 盤より後に描く
     root.add(body);
   },
 
   update(t) {
     const shift = drift(t);
-    dummy.scale.set(1, 1, 1);
     for (let i = 0; i < dice.length; i++) {
       const d = dice[i]!;
       const p = (t + d.off) / SEG;
       const seg = ((Math.floor(p) % LANES) + LANES) % LANES;
       const glow = place(d, seg, p - Math.floor(p));
 
+      // 黒曜石は色を黒く落としても映り込みまでは消えない。暗がりを抜けて戻る区間は
+      // 見えていてはいけないので、そこだけは縮めて消す。盤の間を降りる影は残る
+      dummy.scale.setScalar(smooth(clamp01((glow - GONE) / GONE_W)));
       dummy.updateMatrix();
       body.setMatrixAt(i, dummy.matrix);
       ember(color, d.n, shift, glow);
