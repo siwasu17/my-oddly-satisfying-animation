@@ -73,7 +73,7 @@ const BOWL_SWEEP = -Math.PI * 2 * 0.85; // 渦が巻く量
 const BLADE_R = 1.15;
 const SHAFT_R = 0.3;
 const RIDE_R = 1; // 珠が乗る半径。羽根の外寄り
-const BEAD_SIT = BR; // 羽根の面から珠の中心まで
+const DROOP = 0.07; // 羽根の外縁の下げ。珠を抱え込んでいるように見せる
 const SCREW_Y1 = 10.2;
 /**
  * 羽根が回る回数。珠は世界に対して決まった角度のまま登るので、
@@ -165,6 +165,14 @@ const TH_ENTRY = Math.atan2(BOWL_IN.z, BOWL_IN.x);
 const TH_IN = TH_ENTRY + BOWL_SWEEP;
 const SCREW_Y0 = coneY(RIDE_R);
 const PITCH = (SCREW_Y1 - SCREW_Y0) / TURNS;
+/**
+ * 羽根の面から珠の中心まで。羽根は螺旋なりに前後へ、外縁の下げぶん内外へ傾いて
+ * いるので、その傾き TILT のぶんだけ珠は半径より高いところで面に触れる。
+ * 外縁の下げは RIDE_R の位置ぶんだけ差し引く。
+ */
+const TILT = Math.hypot(PITCH / (Math.PI * 2 * RIDE_R), DROOP / (BLADE_R - SHAFT_R));
+const BEAD_SIT =
+  BR * Math.sqrt(1 + TILT * TILT) - (DROOP * (RIDE_R - SHAFT_R)) / (BLADE_R - SHAFT_R);
 
 /** すり鉢の渦。落ちてきた速さのまま巻き込み、螺旋が汲み上げる速さで出す。 */
 function vortexPoint(s: number, out: THREE.Vector3): THREE.Vector3 {
@@ -348,7 +356,7 @@ function blade(mat: THREE.Material): THREE.Mesh {
     const s = Math.sin(th);
     pos.push(c * SHAFT_R, y, s * SHAFT_R);
     // 外縁だけわずかに下げると、珠を抱え込んでいるように見える
-    pos.push(c * BLADE_R, y - 0.07, s * BLADE_R);
+    pos.push(c * BLADE_R, y - DROOP, s * BLADE_R);
     if (i > 0) {
       const o = (i - 1) * 2;
       idx.push(o, o + 1, o + 2, o + 1, o + 3, o + 2);
@@ -362,9 +370,18 @@ function blade(mat: THREE.Material): THREE.Mesh {
   return new THREE.Mesh(geo, mat);
 }
 
-/** 羽根の向き。珠の高さの式から逆に求めているので、両者は決してずれない。 */
+/**
+ * 羽根の向き。珠の高さの式から逆に求めているので、両者は決してずれない。
+ *
+ * 羽根の局所角 th の点は、group.rotation.y = spin だけ回すと世界では
+ * 方位 th - spin に来る。珠はいつも方位 TH_IN にいるので、珠の真下の羽根は
+ * th = TH_IN + spin。その高さ SCREW_Y0 - BEAD_SIT + PITCH*th/2π が
+ * 珠の高さ mix(SCREW_Y0, SCREW_Y1, s) から BEAD_SIT 下であればよく、
+ * th = 2π*TURNS*s、すなわち spin = 2π*TURNS*s - TH_IN になる。
+ * s が進むほど spin は増える（＝渦と同じ向きに回る）。
+ */
 const spinOf = (t: number): number =>
-  TH_IN - (Math.PI * 2 * TURNS * (t / CYCLE - P_SCREW)) / (1 - P_SCREW);
+  (Math.PI * 2 * TURNS * (t / CYCLE - P_SCREW)) / (1 - P_SCREW) - TH_IN;
 
 let buckets: THREE.Group[] = [];
 let bucketMats: THREE.MeshStandardMaterial[] = [];
