@@ -53,7 +53,6 @@ const REST_Y = -(TROUGH_R - BR); // 筒の底から珠の中心まで
 
 // 段々の並び。塔をゆるく回りながら降りる。
 const R_OUT = 3.4;
-const R_POST = 4.5; // 柱を立てる半径
 const PHI0 = 1.75; // 段々が画面の左右いっぱいに散るよう、カメラの向きに合わせてある
 const DPHI = -0.2334;
 const Y_TOP = 8.7;
@@ -463,27 +462,21 @@ export const cascadeTower: SceneModule = {
     rim.rotation.x = Math.PI / 2;
     rim.position.y = BOWL_TOP_Y;
     root.add(rim);
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2 + 0.4;
-      root.add(
-        strut(
-          va.set(Math.cos(a) * (BOWL_TOP_R - 0.2), 0, Math.sin(a) * (BOWL_TOP_R - 0.2)),
-          vb.set(Math.cos(a) * (BOWL_TOP_R - 0.2), BOWL_TOP_Y, Math.sin(a) * (BOWL_TOP_R - 0.2)),
-          partMat,
-          0.11,
-        ),
-      );
-    }
 
     // 螺旋ポンプ。羽根だけをまとめて回し、芯と籠は止めておく。
+    // 塔を床から支えるものは何も置かない。桶も樋もすり鉢も、暗がりに浮いている。
     screw = new THREE.Group();
     screw.add(blade(bladeMat));
     root.add(screw);
+    // 芯は絞り口の少し下で止める。床へ向かって伸ばすと、何にも刺さっていない
+    // 棒の先がすり鉢の裏から覗く。
+    const SHAFT_Y0 = BOWL_Y - 0.4;
+    const SHAFT_Y1 = SCREW_Y1 + 0.6;
     const shaft = new THREE.Mesh(
-      new THREE.CylinderGeometry(SHAFT_R, SHAFT_R, SCREW_Y1 + 0.9, 16),
+      new THREE.CylinderGeometry(SHAFT_R, SHAFT_R, SHAFT_Y1 - SHAFT_Y0, 16),
       partMat,
     );
-    shaft.position.y = (SCREW_Y1 + 0.9) / 2 - 0.3;
+    shaft.position.y = (SHAFT_Y0 + SHAFT_Y1) / 2;
     root.add(shaft);
     // 籠。羽根を隠さないよう、縦棒と輪だけで囲う。
     const CAGE_R = 1.45;
@@ -554,20 +547,6 @@ export const cascadeTower: SceneModule = {
       buckets.push(g);
       bucketMats.push(mat);
 
-      // 柱と、支点を受ける腕。腕は桶の下をくぐらせる。
-      const a = PHI0 + i * DPHI;
-      const foot = new THREE.Vector3(Math.cos(a) * R_POST, 0, Math.sin(a) * R_POST);
-      root.add(
-        strut(foot, va.copy(foot).setY(PIVOT[i]!.y - TROUGH_R - 0.1), partMat, 0.1),
-      );
-      root.add(
-        strut(
-          va.copy(foot).setY(PIVOT[i]!.y - TROUGH_R - 0.1),
-          vb.copy(PIVOT[i]!).addScaledVector(UP, -TROUGH_R - 0.1),
-          partMat,
-          0.07,
-        ),
-      );
       // 受け石。空になった桶が戻ってきて打つところ。
       const stone = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.16, 0.7), partMat);
       stone.position.copy(PIVOT[i]!).addScaledVector(FWD[i]!, LIP * 0.62).addScaledVector(UP, -TROUGH_R - 0.08);
