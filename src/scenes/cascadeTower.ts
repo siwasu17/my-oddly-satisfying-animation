@@ -53,7 +53,6 @@ const REST_Y = -(TROUGH_R - BR); // 筒の底から珠の中心まで
 
 // 段々の並び。塔をゆるく回りながら降りる。
 const R_OUT = 3.4;
-const R_POST = 4.5; // 柱を立てる半径
 const PHI0 = 1.75; // 段々が画面の左右いっぱいに散るよう、カメラの向きに合わせてある
 const DPHI = -0.2334;
 const Y_TOP = 8.7;
@@ -73,7 +72,7 @@ const BOWL_SWEEP = -Math.PI * 2 * 0.85; // 渦が巻く量
 const BLADE_R = 1.15;
 const SHAFT_R = 0.3;
 const RIDE_R = 1; // 珠が乗る半径。羽根の外寄り
-const BEAD_SIT = BR; // 羽根の面から珠の中心まで
+const DROOP = 0.07; // 羽根の外縁の下げ。珠を抱え込んでいるように見せる
 const SCREW_Y1 = 10.2;
 /**
  * 羽根が回る回数。珠は世界に対して決まった角度のまま登るので、
@@ -165,6 +164,14 @@ const TH_ENTRY = Math.atan2(BOWL_IN.z, BOWL_IN.x);
 const TH_IN = TH_ENTRY + BOWL_SWEEP;
 const SCREW_Y0 = coneY(RIDE_R);
 const PITCH = (SCREW_Y1 - SCREW_Y0) / TURNS;
+/**
+ * 羽根の面から珠の中心まで。羽根は螺旋なりに前後へ、外縁の下げぶん内外へ傾いて
+ * いるので、その傾き TILT のぶんだけ珠は半径より高いところで面に触れる。
+ * 外縁の下げは RIDE_R の位置ぶんだけ差し引く。
+ */
+const TILT = Math.hypot(PITCH / (Math.PI * 2 * RIDE_R), DROOP / (BLADE_R - SHAFT_R));
+const BEAD_SIT =
+  BR * Math.sqrt(1 + TILT * TILT) - (DROOP * (RIDE_R - SHAFT_R)) / (BLADE_R - SHAFT_R);
 
 /** すり鉢の渦。落ちてきた速さのまま巻き込み、螺旋が汲み上げる速さで出す。 */
 function vortexPoint(s: number, out: THREE.Vector3): THREE.Vector3 {
@@ -348,7 +355,7 @@ function blade(mat: THREE.Material): THREE.Mesh {
     const s = Math.sin(th);
     pos.push(c * SHAFT_R, y, s * SHAFT_R);
     // 外縁だけわずかに下げると、珠を抱え込んでいるように見える
-    pos.push(c * BLADE_R, y - 0.07, s * BLADE_R);
+    pos.push(c * BLADE_R, y - DROOP, s * BLADE_R);
     if (i > 0) {
       const o = (i - 1) * 2;
       idx.push(o, o + 1, o + 2, o + 1, o + 3, o + 2);
@@ -362,15 +369,24 @@ function blade(mat: THREE.Material): THREE.Mesh {
   return new THREE.Mesh(geo, mat);
 }
 
-/** 羽根の向き。珠の高さの式から逆に求めているので、両者は決してずれない。 */
+/**
+ * 羽根の向き。珠の高さの式から逆に求めているので、両者は決してずれない。
+ *
+ * 羽根の局所角 th の点は、group.rotation.y = spin だけ回すと世界では
+ * 方位 th - spin に来る。珠はいつも方位 TH_IN にいるので、珠の真下の羽根は
+ * th = TH_IN + spin。その高さ SCREW_Y0 - BEAD_SIT + PITCH*th/2π が
+ * 珠の高さ mix(SCREW_Y0, SCREW_Y1, s) から BEAD_SIT 下であればよく、
+ * th = 2π*TURNS*s、すなわち spin = 2π*TURNS*s - TH_IN になる。
+ * s が進むほど spin は増える（＝渦と同じ向きに回る）。
+ */
 const spinOf = (t: number): number =>
-  TH_IN - (Math.PI * 2 * TURNS * (t / CYCLE - P_SCREW)) / (1 - P_SCREW);
+  (Math.PI * 2 * TURNS * (t / CYCLE - P_SCREW)) / (1 - P_SCREW) - TH_IN;
 
 let buckets: THREE.Group[] = [];
 let bucketMats: THREE.MeshStandardMaterial[] = [];
 let screw: THREE.Group;
 let beads: THREE.Mesh[] = [];
-let beadMat: THREE.MeshPhysicalMaterial;
+let beadMat: THREE.MeshStandardMaterial;
 const spin = new THREE.Quaternion();
 const qtip = new THREE.Quaternion();
 
@@ -395,39 +411,44 @@ export const cascadeTower: SceneModule = {
       swirl: ticker(),
     };
 
+    // 色は発光ではなく陰影で見せる。emissive を自分の色と同じだけ持たせると
+    // ライトの明暗が消えて、切り絵を重ねたように平たくなる。塔の奥行きは
+    // 「骨組みは暗く、動く部分ほど明るく」という明度の段差だけで作り、
+    // 色相も下ほど薔薇、上ほど琥珀へわずかに振っておく。
+
+    // 樋と縁。磨きを落として艶を広く散らす。鏡面が狭いと、上を向いた樋が
+    // キーライトを一点で返して白く飛び、動いていない部品が画面でいちばん明るくなる。
     const metalMat = new THREE.MeshStandardMaterial({
-      color: emberColor(0.32),
-      emissive: emberColor(0.08),
-      roughness: 0.34,
-      metalness: 0.78,
+      color: emberColor(0.4, 0.015),
+      roughness: 0.46,
+      metalness: 0.7,
       side: THREE.DoubleSide,
     });
+    // 柱・籠・芯。数が多いので、暗がりへ沈めて塔の輪郭だけ残す。
     const partMat = new THREE.MeshStandardMaterial({
-      color: SURFACE,
-      roughness: 0.5,
-      metalness: 0.7,
+      color: emberColor(0.1, -0.02),
+      roughness: 0.6,
+      metalness: 0.5,
+    });
+    // 螺旋の羽根。籠の内側で陰になるぶん、地の色を上げて動きを読めるようにする。
+    const bladeMat = new THREE.MeshStandardMaterial({
+      color: emberColor(0.48, 0.01),
+      roughness: 0.42,
+      metalness: 0.66,
+      side: THREE.DoubleSide,
     });
     const bowlMat = new THREE.MeshStandardMaterial({
-      color: emberColor(0.22),
-      emissive: emberColor(0.06),
-      roughness: 0.28,
-      metalness: 0.85,
+      color: emberColor(0.3, -0.02),
+      roughness: 0.34,
+      metalness: 0.8,
       side: THREE.DoubleSide,
     });
-    // 珠は「光る球」ではなく「灯りをうっすら含んだガラス珠」にする。
-    // 発光をブルームの閾値より下に抑え、明るさではなく透過と艶で見せる。
-    beadMat = new THREE.MeshPhysicalMaterial({
-      color: emberColor(0.5),
-      emissive: emberColor(0.62),
-      roughness: 0.06,
-      metalness: 0,
-      transmission: 0.72,
-      thickness: BR * 1.5,
-      ior: 1.46,
-      attenuationColor: emberColor(0.55),
-      attenuationDistance: BR * 3,
-      clearcoat: 1,
-      clearcoatRoughness: 0.08,
+    // 珠は光らせない。Curtain Wave の珠と同じく、艶のある玉をライトに任せて
+    // 見せる。小さくて動きが速いので、艶で光る瞬間があるほうが目で追いやすい。
+    beadMat = new THREE.MeshStandardMaterial({
+      color: emberColor(0.85),
+      roughness: 0.25,
+      metalness: 0.45,
     });
 
     // すり鉢。上の縁から絞り口まで、内側を珠が滑り降りる。
@@ -441,27 +462,21 @@ export const cascadeTower: SceneModule = {
     rim.rotation.x = Math.PI / 2;
     rim.position.y = BOWL_TOP_Y;
     root.add(rim);
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2 + 0.4;
-      root.add(
-        strut(
-          va.set(Math.cos(a) * (BOWL_TOP_R - 0.2), 0, Math.sin(a) * (BOWL_TOP_R - 0.2)),
-          vb.set(Math.cos(a) * (BOWL_TOP_R - 0.2), BOWL_TOP_Y, Math.sin(a) * (BOWL_TOP_R - 0.2)),
-          partMat,
-          0.11,
-        ),
-      );
-    }
 
     // 螺旋ポンプ。羽根だけをまとめて回し、芯と籠は止めておく。
+    // 塔を床から支えるものは何も置かない。桶も樋もすり鉢も、暗がりに浮いている。
     screw = new THREE.Group();
-    screw.add(blade(metalMat));
+    screw.add(blade(bladeMat));
     root.add(screw);
+    // 芯は絞り口の少し下で止める。床へ向かって伸ばすと、何にも刺さっていない
+    // 棒の先がすり鉢の裏から覗く。
+    const SHAFT_Y0 = BOWL_Y - 0.4;
+    const SHAFT_Y1 = SCREW_Y1 + 0.6;
     const shaft = new THREE.Mesh(
-      new THREE.CylinderGeometry(SHAFT_R, SHAFT_R, SCREW_Y1 + 0.9, 16),
+      new THREE.CylinderGeometry(SHAFT_R, SHAFT_R, SHAFT_Y1 - SHAFT_Y0, 16),
       partMat,
     );
-    shaft.position.y = (SCREW_Y1 + 0.9) / 2 - 0.3;
+    shaft.position.y = (SHAFT_Y0 + SHAFT_Y1) / 2;
     root.add(shaft);
     // 籠。羽根を隠さないよう、縦棒と輪だけで囲う。
     const CAGE_R = 1.45;
@@ -516,10 +531,10 @@ export const cascadeTower: SceneModule = {
 
     for (let i = 0; i < STEPS; i++) {
       const mat = new THREE.MeshStandardMaterial({
-        color: emberColor(0.38),
-        emissive: emberColor(0.16),
-        roughness: 0.3,
-        metalness: 0.8,
+        color: emberColor(0.6, 0.02),
+        emissive: 0x000000,
+        roughness: 0.28,
+        metalness: 0.78,
         side: THREE.DoubleSide,
       });
       const g = new THREE.Group();
@@ -532,20 +547,6 @@ export const cascadeTower: SceneModule = {
       buckets.push(g);
       bucketMats.push(mat);
 
-      // 柱と、支点を受ける腕。腕は桶の下をくぐらせる。
-      const a = PHI0 + i * DPHI;
-      const foot = new THREE.Vector3(Math.cos(a) * R_POST, 0, Math.sin(a) * R_POST);
-      root.add(
-        strut(foot, va.copy(foot).setY(PIVOT[i]!.y - TROUGH_R - 0.1), partMat, 0.1),
-      );
-      root.add(
-        strut(
-          va.copy(foot).setY(PIVOT[i]!.y - TROUGH_R - 0.1),
-          vb.copy(PIVOT[i]!).addScaledVector(UP, -TROUGH_R - 0.1),
-          partMat,
-          0.07,
-        ),
-      );
       // 受け石。空になった桶が戻ってきて打つところ。
       const stone = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.16, 0.7), partMat);
       stone.position.copy(PIVOT[i]!).addScaledVector(FWD[i]!, LIP * 0.62).addScaledVector(UP, -TROUGH_R - 0.08);
@@ -560,9 +561,11 @@ export const cascadeTower: SceneModule = {
       beads.push(bead);
     }
 
+    // 床は磨きすぎない。鏡のようにするとライトの映り込みが床で光の塊になり、
+    // 塔より明るくなって視線を持っていかれる。
     const floor = new THREE.Mesh(
       new THREE.CircleGeometry(20, 96),
-      new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.25, metalness: 0.9 }),
+      new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.62, metalness: 0.4 }),
     );
     floor.rotation.x = -Math.PI / 2;
     root.add(floor);
@@ -588,22 +591,23 @@ export const cascadeTower: SceneModule = {
       }
       bead.position.copy(v);
     }
-    ember(color, 0.62, d);
-    beadMat.emissive.copy(color);
-    ember(color, 0.5, d);
+    ember(color, 0.85, d);
     beadMat.color.copy(color);
-    beadMat.attenuationColor.copy(color);
 
     for (let i = 0; i < STEPS; i++) {
       const k = since(t, stepPhase(i)) / K_SPAN;
       qtip.setFromAxisAngle(ZAXIS, -tipAngle(k));
       buckets[i]!.quaternion.copy(BASE[i]!).multiply(qtip);
-      // 受け石を打った瞬間だけ明るくなり、すぐ落ち着く
-      const tau = Math.max(k - (K_DWELL + K_BACK), 0) * STEP * CYCLE;
-      const hit = k > K_DWELL ? Math.exp(-2.5 * tau) : 0;
-      ember(color, 0.38 + hit * 0.4, d, hit * 0.1);
+      // 受け石を打った瞬間だけ熱がともり、すぐ冷める。
+      // 地の色は動かさず emissive だけを足すので、形は陰影で見えたまま。
+      // 光るのは打った後だけ。戻っている途中から点けると、まだ音の鳴らない
+      // 傾いた桶が画面でいちばん明るくなってしまう。
+      const tau = k - (K_DWELL + K_BACK);
+      const hit = tau > 0 ? Math.exp(-2.5 * tau * STEP * CYCLE) : 0;
+      ember(color, 0.6 + hit * 0.22, d + 0.02);
       bucketMats[i]!.color.copy(color);
-      bucketMats[i]!.emissive.copy(color);
+      ember(color, 0.66, d + 0.02);
+      bucketMats[i]!.emissive.copy(color).multiplyScalar(hit * 0.34);
     }
 
     screw.rotation.y = spinOf(t);
