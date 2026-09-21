@@ -68,6 +68,6 @@ docs/                  作りのノートとブラウザ自動操作のメモ
 
 ## もっと詳しく
 
-- [`docs/design-notes.md`](./docs/design-notes.md) — 水面の作り・効果音・色づくり・画面サイズへの追従・PWA
+- [`docs/design-notes.md`](./docs/design-notes.md) — 位相で回す仕掛け・ループの閉じ方・数を出す・シェーダの差し込み・水面の作り・効果音・色づくり・画面サイズへの追従・PWA
 - [`CLAUDE.md`](./CLAUDE.md) — Claude Code セッションの作業ルール
 - [`docs/browser-automation.md`](./docs/browser-automation.md) — `npm run shot` と agent-browser
