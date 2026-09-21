@@ -224,7 +224,7 @@ let gondolas: THREE.Group[] = [];
 let bars: THREE.Group[] = [];
 let barMats: THREE.MeshStandardMaterial[] = [];
 let balls: THREE.Mesh[] = [];
-let ballMat: THREE.MeshPhysicalMaterial;
+let ballMat: THREE.MeshStandardMaterial;
 /** 玉の自転。進んだ距離を積み上げるので、区間ごとの速さの違いがそのまま出る。 */
 const spin = new THREE.Quaternion();
 
@@ -253,31 +253,23 @@ export const marbleMachine: SceneModule = {
       bar: tickers(BAR_AT.length),
     };
 
+    // 骨組みは金属の地色だけで見せる。発光を混ぜると細い管が一様に光って
+    // 陰影が消え、他のシーンより彩度の高い薔薇色に浮いてしまう。
     const railMat = new THREE.MeshStandardMaterial({
-      color: emberColor(0.34),
-      emissive: emberColor(0.1),
-      roughness: 0.35,
-      metalness: 0.75,
+      color: emberColor(0.44, 0.015),
+      roughness: 0.42,
+      metalness: 0.72,
     });
     const partMat = new THREE.MeshStandardMaterial({
-      color: SURFACE,
-      roughness: 0.5,
-      metalness: 0.7,
+      color: emberColor(0.12, -0.01),
+      roughness: 0.58,
+      metalness: 0.5,
     });
-    // 玉は「光る球」ではなく「灯りをうっすら含んだガラス玉」にする。
-    // 発光をブルームの閾値より下に抑え、明るさではなく透過と艶で見せる。
-    ballMat = new THREE.MeshPhysicalMaterial({
-      color: emberColor(0.5),
-      emissive: emberColor(0.62),
-      roughness: 0.06,
-      metalness: 0,
-      transmission: 0.72,
-      thickness: BR * 1.5,
-      ior: 1.46,
-      attenuationColor: emberColor(0.55),
-      attenuationDistance: BR * 3,
-      clearcoat: 1,
-      clearcoatRoughness: 0.08,
+    // 玉は光らせない。琥珀寄りの地色と低い粗さで、装置より一段だけ明るく見せる。
+    ballMat = new THREE.MeshStandardMaterial({
+      color: emberColor(0.82),
+      roughness: 0.18,
+      metalness: 0.42,
     });
 
     // 通り道。板と昇降機の区間だけは仕掛けが玉を運ぶので、レールを敷かない。
@@ -373,10 +365,10 @@ export const marbleMachine: SceneModule = {
     for (const s of BAR_AT) {
       rollPoint(s, v);
       const mat = new THREE.MeshStandardMaterial({
-        color: emberColor(0.4),
-        emissive: emberColor(0.2),
-        roughness: 0.3,
-        metalness: 0.85,
+        color: emberColor(0.42, 0.005),
+        emissive: 0x000000,
+        roughness: 0.38,
+        metalness: 0.7,
       });
       const g = new THREE.Group();
       g.position.set(v.x, v.y + BAR_TOP, v.z);
@@ -420,11 +412,8 @@ export const marbleMachine: SceneModule = {
       }
       ball.position.copy(v);
     }
-    ember(color, 0.62, d);
-    ballMat.emissive.copy(color);
-    ember(color, 0.5, d);
+    ember(color, 0.82, d);
     ballMat.color.copy(color);
-    ballMat.attenuationColor.copy(color);
 
     // シーソー。玉が乗っている間に傾き、離れてからゆっくり戻る。
     const m = since(t, P_SEESAW);
@@ -447,9 +436,11 @@ export const marbleMachine: SceneModule = {
       const tau = since(t, barPhase(i)) * (CYCLE / BALLS);
       const damp = Math.exp(-1.5 * tau);
       bars[i]!.rotation.z = -BAR_SWING * damp * Math.sin(5.5 * tau);
-      ember(color, 0.4 + damp * 0.45, d, damp * 0.12);
+      // 地の色は動かさず、弾かれた直後だけ emissive を足す。形は陰影で見えたまま。
+      ember(color, 0.42, d);
       barMats[i]!.color.copy(color);
-      barMats[i]!.emissive.copy(color);
+      ember(color, 0.78, d + 0.01);
+      barMats[i]!.emissive.copy(color).multiplyScalar(damp * 0.3);
     }
   },
 
