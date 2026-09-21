@@ -28,6 +28,7 @@ const H = 1.18; // 上下の頂点までの高さ
 const M = H / 9.4721; // 赤道のジグザグの振れ幅。この比のときだけ 10 枚の凧形が平面になる
 const MIN_GAP = 2.35; // ダイス同士の最短距離。これ未満なら投げ直して重なりを避ける
 const FLOOR_R = 10.8; // 床の半径
+const FLOOR_Y = -0.02; // 床面の高さ。ここより下は描かない（沈むダイスを床の裏から見せない）
 const WALL_R = 9.4; // ダイスの中心がここを越えると縁で跳ね返る。床の内側に取る
 const RIM_H = 0.8; // 卓の縁の高さ。跳ね返る理由が絵で分かるように立てておく
 const TRAVEL_MIN = 12.0; // 手を離れてから止まるまでに、床を這って進む距離
@@ -242,6 +243,38 @@ interface Die {
   qFinal: THREE.Quaternion;
 }
 
+/**
+ * 床面より下に来たフラグメントを捨てる。
+ *
+ * 床は厚みの無い円盤なので、カメラを真横近くまで下ろすと、視線が円盤の縁の外を回って
+ * 床下へ抜ける。そこに、沈んでいる途中のダイスや次の出番を待っているダイスが見えてしまう。
+ * 床に厚みを持たせて隠すと、沈む深さのぶんだけ分厚い樽になって卓に見えなくなるので、
+ * 隠すのではなくダイスの材のほうで床面より下を描かないようにする。
+ */
+function clipBelowFloor(mat: THREE.MeshStandardMaterial): void {
+  // これが無いと差し込みが効かないことがある。three はコンパイル済みプログラムを
+  // マテリアルの「パラメータ」で引いたキャッシュから取るが、そのキーに
+  // onBeforeCompile の中身は入らない。同じパラメータの標準マテリアルが他のシーンにあると、
+  // そちらのプログラムが使い回されてしまう。
+  mat.customProgramCacheKey = () => 'd10Toss-floorClip';
+
+  mat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying float vWorldY;')
+      .replace(
+        '#include <project_vertex>',
+        'vWorldY = (modelMatrix * vec4(transformed, 1.0)).y;\n#include <project_vertex>',
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying float vWorldY;')
+      .replace(
+        '#include <clipping_planes_fragment>',
+        `#include <clipping_planes_fragment>
+         if (vWorldY < ${FLOOR_Y.toFixed(3)}) discard;`,
+      );
+  };
+}
+
 let dice: Die[] = [];
 let seedOffset = 0;
 let cycle = -1;
@@ -435,7 +468,7 @@ export const d10Toss: SceneModule = {
       new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.78, metalness: 0.14 }),
     );
     floor.rotation.x = -Math.PI / 2;
-    floor.position.y = -0.02;
+    floor.position.y = FLOOR_Y;
     root.add(floor);
 
     // 卓の縁。ダイスが跳ね返る位置（WALL_R + ダイスの半径）にちょうど内面が来る。
@@ -449,7 +482,7 @@ export const d10Toss: SceneModule = {
         side: THREE.DoubleSide,
       }),
     );
-    rim.position.y = RIM_H / 2 - 0.02;
+    rim.position.y = RIM_H / 2 + FLOOR_Y;
     root.add(rim);
 
     // 縁の上端をなぞる細い明るい輪。これが卓の輪郭線になる。
@@ -458,7 +491,7 @@ export const d10Toss: SceneModule = {
       new THREE.MeshStandardMaterial({ color: emberColor(0.27), roughness: 0.45, metalness: 0.35 }),
     );
     lip.rotation.x = -Math.PI / 2;
-    lip.position.y = RIM_H - 0.02;
+    lip.position.y = RIM_H + FLOOR_Y;
     root.add(lip);
 
     const mat = new THREE.MeshStandardMaterial({
@@ -467,6 +500,7 @@ export const d10Toss: SceneModule = {
       roughness: 0.34,
       metalness: 0.42,
     });
+    clipBelowFloor(mat);
 
     dice = [];
     for (let i = 0; i < DICE; i++) {
