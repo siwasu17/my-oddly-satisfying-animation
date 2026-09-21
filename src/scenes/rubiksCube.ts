@@ -4,9 +4,19 @@ import { tone, ticker } from '../audio.ts';
 import { SURFACE, emberColor } from '../palette.ts';
 
 /**
- * 宙に浮いた 3×3×3 のキューブが、1 レイヤーずつ 90° だけ回る。
+ * 宙に浮いた 3×3×3 のキューブが、1 レイヤーずつ回る。
  * 溜めてから一息に回り、角がぴたりと揃って止まる——その決まり方が芯。
- * 12 手のうち後半 6 手が前半の逆手なので、16.8 秒でステッカーの並びが完全に元へ戻る。
+ *
+ * 混ぜ方は固定シードの乱数で作る。開き直せば同じだが、1 周のあいだに 4 本の別の手順が走る。
+ * 軸・レイヤー（外側 2 枚と中央）・向き・回す量（90°/180°/270°）がすべて振られる。
+ *
+ * 戻すときに来た道を逆再生しないために、手順を「位数 2 のブロック」で組んである。
+ * ブロックは g・180°・g⁻¹ の形にしてあり、2 回続けて実行すると必ず元へ戻る。
+ * だから混ぜが A B C なら、戻しは C B A ——
+ * ブロックの並びが裏返るだけで、ブロックの中身は混ぜたときと同じ向きに進む。
+ * さらに各ブロックは「90° の逆回し」を「270° の順回し」へ振り替えた別表現で回すので、
+ * 同じブロックでも混ぜと戻しでは絵が違う。
+ *
  * 面の色は 6 色ではなく暖色帯の 6 段階の濃淡（青を画面へ入れないため）。
  * カメラは少し斜め上から。手が決まった瞬間だけ pluck が 1 音鳴る。
  */
@@ -15,8 +25,12 @@ const CUBIE = 1.86; // 小立方体の一辺
 const SPACING = 2.0; // 中心間の距離。差の 0.14 が溝になる
 const STICKER = 1.64; // ステッカーの一辺。溝を細くして 3×3 の格子と色面を読ませる
 const CENTER_Y = 3.6; // キューブの中心高さ。レイヤーが回っても角が床を割らない高さ
-const STEP_DUR = 1.4; // 1 手にかける秒数
-const HOLD = 0.18; // 各手の前後の静止（1 手のうちの割合）
+const HOLD = 0.18; // 各手の前後に入れる静止（秒）
+const TURN_SEC = 0.75; // 90° を回しきるのにかける秒
+const TURN_POW = 0.56; // 180°/270° を何倍の時間で回すか。1 未満なので大きく回すほど勢いが乗る
+const PAUSE = 0.7; // 並びが揃ったところで置く余韻（秒）
+const CYCLES = 4; // 1 ループに入れる「混ぜて戻す」の本数。それぞれ手順が違う
+const SEED = 0x314159; // 手順を決める種。軸とレイヤーの散らばり、尺、混ざり具合を見て選んである
 const SPIN = 0.05; // 全体がゆっくり流れる速さ（rad/s）
 const TILT = 0.5; // 初期のヨー角。角が正面に来ないようずらす
 const FLOOR_R = 11;
@@ -47,28 +61,132 @@ const FACES: { ax: 0 | 1 | 2; sg: 1 | -1; rot: [number, number, number] }[] = [
 
 const AXES = [new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1)];
 
-type Move = { axis: 0 | 1 | 2; layer: 1 | -1; dir: 1 | -1 };
+// #region gen
+type Axis = 0 | 1 | 2;
+type Layer = -1 | 0 | 1;
 
-/** 前半 6 手。軸と層を散らして、同じ面ばかり回らないようにしてある */
-const HALF: Move[] = [
-  { axis: 0, layer: 1, dir: -1 },
-  { axis: 1, layer: 1, dir: -1 },
-  { axis: 2, layer: 1, dir: 1 },
-  { axis: 0, layer: -1, dir: 1 },
-  { axis: 1, layer: -1, dir: -1 },
-  { axis: 2, layer: -1, dir: 1 },
-];
+/** 1 手。q は 90° を単位にした符号付きの回す量（±1 / ±2 / ±3） */
+type Move = { axis: Axis; layer: Layer; q: number };
 
-/** 後半は前半の逆順・逆回転。これで 1 周すると必ず初期状態へ戻る */
-const MOVES: Move[] = [
-  ...HALF,
-  ...HALF.slice()
+/** 固定シードの擬似乱数。Math.random() だと開き直すたびに手順が変わってしまう。 */
+function rng(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x9e3779b9) >>> 0;
+    let x = s;
+    x = Math.imul(x ^ (x >>> 16), 0x21f0aaad);
+    x = Math.imul(x ^ (x >>> 15), 0x735a2d97);
+    x ^= x >>> 15;
+    return (x >>> 0) / 4294967296;
+  };
+}
+
+/** 直前と違う軸を選ぶ。同じ軸が続くと 2 手が 1 手にまとまって見えてしまう。 */
+function pickAxis(rnd: () => number, avoid: number): Axis {
+  const r = Math.floor(rnd() * (avoid < 0 ? 3 : 2));
+  return (avoid < 0 ? r : (avoid + 1 + r) % 3) as Axis;
+}
+
+/** 外側 2 枚と中央。中央は回っても輪郭が変わらないので、出る割合を少し下げてある。 */
+function pickLayer(rnd: () => number): Layer {
+  const r = rnd();
+  return r < 0.38 ? -1 : r < 0.74 ? 1 : 0;
+}
+
+/**
+ * 2 回続けて実行すると必ず元へ戻る手順（位数 2）を作る。
+ *
+ * 芯にあるのは 180°。それ自体が 2 回で戻るので、前に g を、後ろに g の巻き戻しを置いた
+ * (g h g⁻¹)(g h g⁻¹) = g h h g⁻¹ = g g⁻¹ = 何もしないのと同じ、という組み方になる。
+ * この性質のおかげで、戻しの手順をブロック単位の並べ替えだけで作れる。
+ *
+ * wide にすると芯を同じ軸の 2 枚にする。互いに可換でどちらも 2 回で戻るので性質は変わらず、
+ * 1 ブロックで動く小立方体がほぼ倍になる——つまり、少ない手数でよく混ざる。
+ */
+function block(rnd: () => number, glen: number, wide: boolean): Move[] {
+  const g: Move[] = [];
+  let prev = -1;
+  for (let i = 0; i < glen; i++) {
+    const ax = pickAxis(rnd, prev);
+    g.push({ axis: ax, layer: pickLayer(rnd), q: rnd() < 0.5 ? 1 : -1 });
+    prev = ax;
+  }
+
+  const ax = pickAxis(rnd, prev);
+  const layer = pickLayer(rnd);
+  const h: Move[] = [{ axis: ax, layer, q: rnd() < 0.5 ? 2 : -2 }];
+  if (wide) {
+    const rest = ([-1, 0, 1] as Layer[]).filter((l) => l !== layer);
+    h.push({ axis: ax, layer: rest[rnd() < 0.5 ? 0 : 1], q: rnd() < 0.5 ? 2 : -2 });
+  }
+
+  const back = g
+    .slice()
     .reverse()
-    .map((m): Move => ({ axis: m.axis, layer: m.layer, dir: (-m.dir) as 1 | -1 })),
-];
+    .map((m): Move => ({ ...m, q: -m.q }));
+  return [...g, ...h, ...back];
+}
 
-const CYCLE = MOVES.length * STEP_DUR;
-const SETTLE = (1 - HOLD) * STEP_DUR; // 回り終わって静止に入る時刻（1 手のうち）
+/**
+ * 結果を変えずに回し方だけを振り替える。
+ * 90° の逆回しは 270° の順回しと同じところへ着くが、絵はまるで違う。
+ * 同じ軸の別レイヤーどうしは順番を入れ替えても結果が変わらないので、そこも混ぜる。
+ */
+function variant(src: Move[], rnd: () => number): Move[] {
+  const out = src.map((m): Move => ({ ...m }));
+  for (const m of out) {
+    if (Math.abs(m.q) === 1 && rnd() < 0.3) m.q = m.q > 0 ? -3 : 3;
+  }
+  for (let i = 0; i + 1 < out.length; i++) {
+    const a = out[i]!;
+    const b = out[i + 1]!;
+    if (a.axis === b.axis && a.layer !== b.layer && rnd() < 0.5) {
+      out[i] = b;
+      out[i + 1] = a;
+    }
+  }
+  return out;
+}
+
+/**
+ * 「混ぜて戻す」1 本。混ぜが A B C なら戻しは C B A。
+ * 末尾の C は 180° 1 手だけのブロックなので、折り返しでは同じレイヤーが 180° ずつ
+ * 2 回回る——つまりぐるりと一周する。ここが混ざりきった山になる。
+ */
+function cycle(rnd: () => number): Move[] {
+  const blocks = [block(rnd, 2, true), block(rnd, 1, false), block(rnd, 0, false)];
+  const mix = blocks.flatMap((b) => variant(b, rnd));
+  const back = blocks
+    .slice()
+    .reverse()
+    .flatMap((b) => variant(b, rnd));
+  return [...mix, ...back];
+}
+
+const MOVES: Move[] = [];
+/** その手で並びが揃う（1 本の終わり）かどうか */
+const AT_END: boolean[] = [];
+{
+  const rnd = rng(SEED);
+  for (let c = 0; c < CYCLES; c++) {
+    const one = cycle(rnd);
+    one.forEach((m, i) => {
+      MOVES.push(m);
+      AT_END.push(i === one.length - 1);
+    });
+  }
+}
+
+/** 各手の開始時刻と、回している最中の秒数。回す量が多い手ほど長く回す。 */
+const START: number[] = [];
+const SPAN: number[] = [];
+let TOTAL = 0;
+MOVES.forEach((m, i) => {
+  START.push(TOTAL);
+  const span = TURN_SEC * Math.pow(Math.abs(m.q), TURN_POW);
+  SPAN.push(span);
+  TOTAL += HOLD * 2 + span + (AT_END[i] ? PAUSE : 0);
+});
 
 /** 中心を除く 26 個の論理座標 */
 const CELLS: [number, number, number][] = [];
@@ -103,7 +221,7 @@ const STATE_QUAT: Float32Array[] = [];
   for (const m of MOVES) {
     STATE_POS.push(pos.slice());
     STATE_QUAT.push(quat.slice());
-    qm.setFromAxisAngle(AXES[m.axis], (m.dir * Math.PI) / 2);
+    qm.setFromAxisAngle(AXES[m.axis], (m.q * Math.PI) / 2);
     for (let i = 0; i < N; i++) {
       if (Math.round(pos[i * 3 + m.axis]) !== m.layer) continue;
       v.set(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]).applyQuaternion(qm);
@@ -118,12 +236,25 @@ const STATE_QUAT: Float32Array[] = [];
     }
   }
 }
+// #endregion
 
-/** 前後に静止を挟んだ smootherstep。溜めてから一息に回る */
-const ease = (p: number): number => {
-  const u = Math.min(1, Math.max(0, (p - HOLD) / (1 - 2 * HOLD)));
-  return u * u * u * (u * (u * 6 - 15) + 10);
-};
+/** ループ内の時刻 tt がどの手に属するか */
+function indexAt(tt: number): number {
+  let lo = 0;
+  let hi = MOVES.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (START[mid] <= tt) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
+/** 静止を挟んだあとの smootherstep。溜めてから一息に回る */
+function ease(u: number): number {
+  const p = u < 0 ? 0 : u > 1 ? 1 : u;
+  return p * p * p * (p * (p * 6 - 15) + 10);
+}
 
 const qLayer = new THREE.Quaternion();
 const qBase = new THREE.Quaternion();
@@ -136,7 +267,7 @@ let turn = 0;
 
 export const rubiksCube: SceneModule = {
   name: 'Rubiks Cube',
-  desc: '一層ずつ 90° だけ回って、12 手で元の並びへ戻ってくる立方体。',
+  desc: '毎回ちがう向きに混ざって、来た道とは別の回し方で揃っていく立方体。',
   // 方位を振って 3 面目を薄く見せ、注視点をキューブより下へ置いて浮いて見せる
   camera: { pos: [9.5, 7.5, 10.9], target: [0, 2.9, 0] },
 
@@ -193,12 +324,13 @@ export const rubiksCube: SceneModule = {
   update(t) {
     pivot.rotation.y = TILT + t * SPIN;
 
-    const ph = (t % CYCLE) / STEP_DUR;
-    const k = Math.min(MOVES.length - 1, Math.floor(ph));
+    const tt = t % TOTAL;
+    const k = indexAt(tt);
     const m = MOVES[k];
     const pos = STATE_POS[k];
     const quat = STATE_QUAT[k];
-    qLayer.setFromAxisAngle(AXES[m.axis], (ease(ph - k) * m.dir * Math.PI) / 2);
+    const e = ease((tt - START[k] - HOLD) / SPAN[k]);
+    qLayer.setFromAxisAngle(AXES[m.axis], (e * m.q * Math.PI) / 2);
 
     for (let i = 0; i < N; i++) {
       vBase.set(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]);
@@ -214,11 +346,22 @@ export const rubiksCube: SceneModule = {
   },
 
   sound(t, _dt, sfx) {
-    // 手が決まる瞬間（回り終わって静止に入る点）で位相が整数をまたぐようにずらしてある
-    for (let n = tick((t + STEP_DUR - SETTLE) / STEP_DUR); n > 0; n--) {
-      const m = MOVES[turn % MOVES.length];
+    // 決まった手の通し番号を位相として渡す。手ごとに長さが違うので割り算では出せない
+    const loop = Math.floor(t / TOTAL);
+    const tt = t - loop * TOTAL;
+    const k = indexAt(tt);
+    const done = tt >= START[k] + HOLD + SPAN[k] ? 1 : 0;
+
+    for (let n = tick(loop * MOVES.length + k + done + 0.5); n > 0; n--) {
+      const i = turn % MOVES.length;
+      const m = MOVES[i];
       turn++;
-      sfx.pluck(tone(4 + (turn % 5)), { gain: 0.3, decay: 1.9, pan: m.layer * 0.35 });
+      sfx.pluck(tone(4 + (i % 5)), { gain: 0.28, decay: 1.9, pan: m.layer * 0.35 });
+      // 並びが揃ったところだけ、上に 2 音重ねて区切りにする
+      if (AT_END[i]) {
+        sfx.pluck(tone(9), { gain: 0.26, decay: 3.6, pan: -0.2 });
+        sfx.pluck(tone(12), { gain: 0.18, decay: 3.6, pan: 0.2 });
+      }
     }
   },
 };
