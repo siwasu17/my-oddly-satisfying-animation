@@ -4,7 +4,7 @@ import { tone, tickers } from '../audio.ts';
 import { ember, emberColor, drift } from '../palette.ts';
 
 /**
- * 何が動くか: 7x7 の盤が 5 枚、広い間隔をあけて真上に積まれている。無地の立方体が
+ * 何が動くか: 7x7 の盤が 5 枚、広い間隔をあけて真上に積まれている。ガラスの立方体が
  *   盤の上を辺を軸にコトンと倒れて気まぐれな隣のマスへ移り、4〜6 手で立ち止まる。
  *   止まった立方体はその場で盤に沈み、暗がりをゆっくり通って、一段下の盤の同じ位置へ
  *   降りてくる。最下段まで降りたものは暗がりを抜けて最上段の上から戻ってくる。
@@ -15,6 +15,8 @@ import { ember, emberColor, drift } from '../palette.ts';
  *   1 個が 5 段を降りて戻るまで 51 秒。30 個の位相を周期全体へ散らしてある。
  * カメラ: 水平から 28 度の斜俯瞰。段と段の空きから 5 枚すべての盤面が見える角度。
  * 音: 沈み始めに drop、下の盤へ着いたときに pluck（半分の立方体だけ）。段が下がるほど音程が低い。
+ * 素材: 立方体も盤のタイルもガラス。稜線を面取りしてあるので、倒れるあいだ角に沿って
+ *   細い反射が流れる。透過は控えめ（背景がほぼ黒なので、透かしすぎると形が消える）。
  * スコープ外: サイコロの目。
  *
  * 立方体どうしの重なりは、なわばりで分けるのではなく build で時間ごとにマスを予約して防ぐ。
@@ -42,9 +44,24 @@ const ROLL_OFF = 0.5; // 手の中で倒れ始める位相のばらつき。揃�
 const FADE = 0.46; // 沈み込みのうち、いちばん暗くなるまでの割合。0.5 に近づけるほど暗い間が短い
 const BACKTRACK = 0.16; // 来た道をそのまま引き返す確率
 const JITTER = 0.45; // 位相を均等割りからずらす幅（秒）
-const BODY_N = 0.42; // 立方体の色
+const BODY_N = 0.46; // 立方体の色。透過で沈む分、素のままより少し明るくしている
 const BODY_VAR = 0.14;
-const TILE_N = 0.032; // 盤のタイルの色。暗く沈めて、上に載る立方体だけを見せる
+const BEVEL = 0.085; // 立方体の面取り幅。稜線に細いハイライトを走らせるためのもの
+const TILE_BEVEL = 0.035; // タイルの面取り幅。厚みが薄いので控えめに
+const BODY_TRANS = 0.62; // 立方体の透け具合。1 に近づけるほど中身が空になる
+const BODY_THICK = DIE * 0.9; // 透過の厚み。これで向こう側の歪み方が決まる
+const ATTEN_N = 0.46; // 厚みを通った光に乗る色
+const ATTEN_DIST = DIE * 1.6; // その色が乗りきるまでの距離。短いほど濃い硝子になる
+const TILE_ALPHA = 0.86; // タイルの不透明度。盤は透かさず、表面の艶だけでガラスに見せる
+const ENV_SKY = 0.72; // 映り込ませる環境の、天頂の明るさ
+const ENV_FLOOR = 0.015; // 同じく足元の暗さ
+const ENV_HORIZON = 0.52; // 明暗の境目が来る高さ。ここが縁に映ると硝子らしくなる
+const ENV_BARS = 4; // 縦に走る明かりの帯の本数。角に沿って反射が流れる
+const ENV_BAR_N = 0.45; // 帯の明るさ
+const ENV_BAR_W = 0.028; // 帯の太さ（経度の割合）
+const BODY_GAIN = 1.7; // 立方体に乗せる映り込みの強さ
+const TILE_GAIN = 0.55; // 盤に乗せる映り込みの強さ
+const TILE_N = 0.03; // 盤のタイルの色。暗く沈めて、上に載る立方体だけを見せる
 const TILE_VAR = 0.04;
 const EDGE_N = 0.15; // 盤の外周のライン
 const DARK = -0.26; // 沈むときに落とす明度。消しきらず、暗がりを降りる影が残る程度にする
@@ -120,6 +137,120 @@ function veil(e: number): number {
   if (e < FADE) return smooth(e / FADE);
   if (e > 1 - FADE) return smooth((1 - e) / FADE);
   return 1;
+}
+
+/**
+ * ガラスに映り込ませるためだけの、その場で作る小さな環境。
+ *
+ * stage には環境マップが無い。映り込みが無いと roughness をいくら下げても
+ * 「つるつるした不透明な塊」にしか見えず、ガラスにならない。天頂を明るく、
+ * 縦に細い帯を何本か置いておくと、面取りした稜線に沿って光が流れる。
+ * build のたびに作り直さないよう、モジュール側に 1 枚だけ持つ。
+ */
+let envTex: THREE.DataTexture | null = null;
+function glassEnv(): THREE.DataTexture {
+  if (envTex) return envTex;
+  const w = 64;
+  const h = 32;
+  const data = new Uint8Array(w * h * 4);
+  const c = new THREE.Color();
+  for (let y = 0; y < h; y++) {
+    const v = y / (h - 1); // 0 = 天頂
+    for (let x = 0; x < w; x++) {
+      const u = x / w;
+      // 水平線の上は明るく、下は落とす。境目をぼかしすぎると映り込みが濁る
+      const sky = smooth(clamp01((ENV_HORIZON - v) / 0.16 + 0.5));
+      let n = ENV_FLOOR + (ENV_SKY - ENV_FLOOR) * sky * (1 - v * 0.5);
+      for (let b = 0; b < ENV_BARS; b++) {
+        const du = Math.abs(((((u - (b + 0.35) / ENV_BARS) % 1) + 1.5) % 1) - 0.5);
+        n += ENV_BAR_N * Math.exp(-(du * du) / (2 * ENV_BAR_W * ENV_BAR_W)) * sky;
+      }
+      ember(c, n);
+      const i = (y * w + x) * 4;
+      data[i] = Math.round(c.r * 255);
+      data[i + 1] = Math.round(c.g * 255);
+      data[i + 2] = Math.round(c.b * 255);
+      data[i + 3] = 255;
+    }
+  }
+  envTex = new THREE.DataTexture(data, w, h);
+  envTex.mapping = THREE.EquirectangularReflectionMapping;
+  envTex.colorSpace = THREE.SRGBColorSpace;
+  envTex.needsUpdate = true;
+  return envTex;
+}
+
+/**
+ * 角も稜線も面取りした箱。
+ * 直角のままだと稜線が 1 本の線にしかならず、光が当たっても硬い樹脂に見える。
+ * 細く面取りしておくと、そこだけ環境の明かりを拾ってガラスの縁らしく光る。
+ */
+function bevelBox(w: number, h: number, d: number, r: number): THREE.BufferGeometry {
+  const hx = w / 2 - r;
+  const hz = d / 2 - r;
+  const shape = new THREE.Shape();
+  shape.moveTo(-hx + r, -hz);
+  shape.lineTo(hx - r, -hz);
+  shape.quadraticCurveTo(hx, -hz, hx, -hz + r);
+  shape.lineTo(hx, hz - r);
+  shape.quadraticCurveTo(hx, hz, hx - r, hz);
+  shape.lineTo(-hx + r, hz);
+  shape.quadraticCurveTo(-hx, hz, -hx, hz - r);
+  shape.lineTo(-hx, -hz + r);
+  shape.quadraticCurveTo(-hx, -hz, -hx + r, -hz);
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: h - 2 * r,
+    bevelEnabled: true,
+    bevelThickness: r,
+    bevelSize: r,
+    bevelOffset: 0,
+    bevelSegments: 2,
+    curveSegments: 3,
+  });
+  geo.translate(0, 0, -(h / 2 - r));
+  geo.rotateX(-Math.PI / 2);
+  return geo;
+}
+
+/**
+ * 立方体のガラス。transmission を使って本当に向こう側を透かす。
+ * 背景はほぼ黒なので、ただ opacity を下げても「暗くなる」だけでガラスにならない。
+ * 透かした先に盤やほかの立方体が歪んで映ることではじめて硝子だと分かる。
+ * 色は instanceColor 側で足すので、ここでは白のままにしておく。
+ */
+function glassBody(): THREE.MeshPhysicalMaterial {
+  return new THREE.MeshPhysicalMaterial({
+    roughness: 0.05,
+    metalness: 0,
+    ior: 1.52,
+    transmission: BODY_TRANS,
+    thickness: BODY_THICK,
+    attenuationColor: emberColor(ATTEN_N),
+    attenuationDistance: ATTEN_DIST,
+    clearcoat: 1,
+    clearcoatRoughness: 0.06,
+    envMap: glassEnv(),
+    envMapIntensity: BODY_GAIN,
+  });
+}
+
+/**
+ * 盤のガラス。こちらは透過を使わない。
+ * transmission を使ったものどうしは互いに映らないので、盤まで透過にすると
+ * 立方体の中から盤が消えてしまう。盤は表面の艶と縁の面取りだけでガラスに見せる。
+ */
+function glassTile(): THREE.MeshPhysicalMaterial {
+  return new THREE.MeshPhysicalMaterial({
+    roughness: 0.14,
+    metalness: 0,
+    transparent: true,
+    opacity: TILE_ALPHA,
+    ior: 1.52,
+    clearcoat: 1,
+    clearcoatRoughness: 0.1,
+    envMap: glassEnv(),
+    envMapIntensity: TILE_GAIN,
+  });
 }
 
 /** 固定シードの乱数（mulberry32）。歩き方を決めるので、質の悪い LCG だと癖が出る。 */
@@ -351,7 +482,7 @@ function place(d: Die, seg: number, f: number): number {
 
 export const diceField: SceneModule = {
   name: 'Dice Field',
-  desc: '間を空けて積んだ 5 枚の盤。立方体は盤を歩き、立ち止まったところで一段下へ降りる。',
+  desc: '間を空けて積んだ 5 枚の盤。ガラスの立方体が盤を歩き、立ち止まったところで一段下へ降りる。',
   camera: { pos: [10, 23.5, 26], target: [0, STACK_H * 0.55, 0] },
 
   build(root) {
@@ -361,8 +492,8 @@ export const diceField: SceneModule = {
 
     // ---- 盤。マスごとのタイルにして、目地で格子を見せる ----
     const tiles = new THREE.InstancedMesh(
-      new THREE.BoxGeometry(TILE, TILE_H, TILE),
-      new THREE.MeshStandardMaterial({ roughness: 0.82, metalness: 0.12 }),
+      bevelBox(TILE, TILE_H, TILE, TILE_BEVEL),
+      glassTile(),
       TIERS * CELLS,
     );
     const rnd = makeRng(0x7a1de5);
@@ -413,11 +544,12 @@ export const diceField: SceneModule = {
 
     // ---- 立方体 ----
     body = new THREE.InstancedMesh(
-      new THREE.BoxGeometry(DIE, DIE, DIE),
-      new THREE.MeshStandardMaterial({ roughness: 0.46, metalness: 0.26 }),
+      bevelBox(DIE, DIE, DIE, BEVEL),
+      glassBody(),
       dice.length,
     );
     body.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    body.renderOrder = 1; // 盤より後に描く
     root.add(body);
   },
 
