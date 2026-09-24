@@ -1,86 +1,70 @@
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import type { SceneModule } from '../types.ts';
 import { tone, ticker } from '../audio.ts';
 import { SURFACE, ember, drift } from '../palette.ts';
 
 /**
- * Soap Carving — 石鹸を削る。
+ * Soap Carving — 石鹸を削る（ASMR の定番「格子切り」）。
  *
- * 板にのせた石鹸の角ブロックの上面を、両手持ちの刃が端から端へ滑っていく。
- * 刃の前で薄い削りくずがくるくると巻き上がり、刃が通った跡には一段低い平らな面が残る。
- * 巻き終わった削りくずは脇へ転がり落ち、小さな山になっていく。
- * 6 本積んだら板ごと右へ流れ、左から色違いの新しい石鹸が入ってきて繰り返す（28 秒で一巡）。
- * 音は削っている間の擦れる息と、削りくずが落ちるときの柔らかい爪弾き。
+ * 板にのせた淡い色の石鹸キューブの正面に、細いカッターが縦 7 本・横 7 本の切り込みを
+ * 1 本ずつ引いて碁盤の目を刻む。続いて大きな包丁がその面のすぐ内側を上から下へ削ぎ下ろし、
+ * 刃が通った段から小さなサイコロがぽろぽろと崩れ落ちて、手前に小山を作る。
+ * これを 3 層くり返したら板ごと右へ流れ、左から色違いの新しい石鹸が入ってくる（28 秒で一巡）。
+ * 音は切り込みの擦れる音と、サイコロが落ちるたびの小さな爪弾き。
  */
 
 // --- 調整する数値 -----------------------------------------------------------
 
-/** 1 ストロークの秒数 */
-const P = 4;
-/** 1 本の石鹸で削る回数（= 積む削りくずの本数。PILE の数と揃える） */
-const K = 6;
+/** 石鹸キューブの一辺と、正面の格子の分割数 */
+const S = 3;
+const GRID = 8;
+const CELL = S / GRID;
+
+/** 1 本の石鹸で削る層の数 */
+const LAYERS = 3;
+/** 1 層の秒数 */
+const P = 8;
 /** 板ごと入れ替える秒数 */
 const T_SWAP = 4;
-/** 一巡の秒数 */
-const CYCLE = K * P + T_SWAP;
+const CYCLE = LAYERS * P + T_SWAP;
 
-/** ストローク内の区切り（秒） */
-const T_DOWN = 0.5; // 刃が下りきる
-const T_END = 3.0; // 刃が反対の端へ着く
-const T_FALL = 0.8; // 削りくずが転がり落ちる時間
+/** 層の中の区切り（秒） */
+const T_SCORE0 = 0.6; // 切り込みを引きはじめる
+const LINE_DUR = 0.3; // 1 本あたり（引く 0.22 + 次へ移る 0.08）
+const LINE_DRAW = 0.22;
+const LINES = (GRID - 1) * 2;
+const T_SCORE1 = T_SCORE0 + LINES * LINE_DUR; // 4.8
+const T_SLICE0 = 5.2; // 包丁が上端に着く
+const T_SLICE1 = 7.0; // 包丁が板に着く
+/** 包丁・カッターが待機する高さ（画面の外） */
+const TOOL_UP = S + 6;
+/** 包丁の刃の高さ（低いほど正面を隠さない） */
+const KNIFE_H = 0.7;
 
-/** 石鹸の寸法。刃は x 方向へ滑る */
-const X0 = -3.0;
-const X1 = 1.4;
-const SZ = 1.6;
-const H0 = 2.0;
-/** 角の丸み */
-const ROUND = 0.16;
-/** 1 回に削る厚み */
-const D = 0.08;
-/** 削る帯の幅（丸めた角の内側の平らなところ） */
-const STRIP_W = SZ - 2 * ROUND + 0.02;
+/** 落ちるサイコロ */
+const GRAVITY = 14;
+const GAP = 0.94; // 削いだあとのサイコロの大きさ（隙間が格子に見える）
 
-/** 板の上面は y = 0 */
-const BOARD_X0 = -4.0;
-const BOARD_X1 = 5.0;
-const BOARD_Z = 3.8;
+/** 板（上面が y = 0） */
+const BOARD_X0 = -2.6;
+const BOARD_X1 = 2.6;
+const BOARD_Z0 = -1.9;
+const BOARD_Z1 = 3.6;
 const BOARD_H = 0.3;
+const SWAP_DIST = 14;
 
-/** 入れ替えで板が流れる距離 */
-const SWAP_DIST = 17;
+/** 石鹸の色: ember の n と、淡くするために混ぜる暖かい白と、その割合 */
+const SOAP_N = [0.55, 0.75, 0.92];
+const SOAP_SHIFT = [0.0, 0.02, -0.02];
+const SOAP_PALE = new THREE.Color(0xdccbc0);
+const SOAP_PALE_MIX = 0.65;
+/** 切り込みの溝の暗さ（石鹸色に掛ける） */
+const GROOVE_DARK = 0.3;
+/** 溝の太さと、面から出す厚み */
+const GROOVE_W = 0.06;
+const GROOVE_D = 0.02;
 
-/** 刃が待機する高さ */
-const HOVER_Y = H0 + 0.22;
-/** 刃が待機する x（石鹸の左端より手前） */
-const HOVER_X = X0 - 0.75;
-/** 刃の傾き（水平からの角度） */
-const BLADE_LEAN = (24 * Math.PI) / 180;
-const BLADE_LEN = 0.85;
-const BLADE_W = 2.2;
-
-/** 削りくずの渦巻き: r = CURL_A + CURL_B * φ */
-const CURL_A = 0.15;
-const CURL_B = 0.0227;
-/** 削った長さのうち、巻きに回る割合（細く軽い巻きにするため） */
-const CURL_SQUEEZE = 0.69;
-const RIBBON_W = STRIP_W - 0.04;
-const SEG = 160;
-const TAIL = 6;
-/** 渦巻きの外端の角度（中心から見て左下） */
-const THETA_OUT = (-150 * Math.PI) / 180;
-
-/** 石鹸の色（ember の n）。一巡ごとに順に替わる */
-const SOAP_N = [0.95, 0.88, 1.0];
-const SOAP_SHIFT = [0.0, 0.03, -0.025];
-/** 明度の持ち上げ。白寄りのクリームにする */
-const SOAP_GLOW = 0.04;
-/** 彩度を落とすために混ぜる暖かい灰色と、その割合（木の色に寄らないよう白っぽくする） */
-const SOAP_GREY = new THREE.Color(0xb3a79d);
-const SOAP_GREY_MIX = 0.45;
-
-// --- 形の計算 ---------------------------------------------------------------
+// --- 小道具 -----------------------------------------------------------------
 
 const smooth = (x: number): number => {
   const u = Math.min(1, Math.max(0, x));
@@ -88,296 +72,310 @@ const smooth = (x: number): number => {
 };
 const lerp = (a: number, b: number, u: number): number => a + (b - a) * u;
 
-/** 長さ L を巻いたときの渦巻きの角度の総量 */
-const curlPhi = (L: number): number =>
-  (-CURL_A + Math.sqrt(CURL_A * CURL_A + 2 * CURL_B * L * CURL_SQUEEZE)) / CURL_B;
-const curlR = (L: number): number => CURL_A + CURL_B * curlPhi(L);
+/** 層 j を削る前の、石鹸の正面の z */
+const frontZ = (j: number): number => S / 2 - j * CELL;
 
-const FULL_L = X1 - X0;
-const FULL_R = curlR(FULL_L);
+const CELLS = GRID * GRID;
+const CUBES = CELLS * LAYERS;
 
-/**
- * 長さ L の削りくずの頂点を書き込む。原点は渦巻きの中心。
- * 刃先（渦巻きの中心から見て (-0.85r, -r - D)）から外端までを短い尾でつなぐ。
- */
-function writeRibbon(pos: Float32Array, L: number): void {
-  const phi = curlPhi(Math.max(L, 1e-4));
-  const rOut = CURL_A + CURL_B * phi;
-  const ox = rOut * Math.cos(THETA_OUT);
-  const oy = rOut * Math.sin(THETA_OUT);
-  const ex = -0.85 * rOut;
-  const ey = -rOut - D;
-  let v = 0;
-  const put = (x: number, y: number): void => {
-    pos[v++] = x;
-    pos[v++] = y;
-    pos[v++] = -RIBBON_W / 2;
-    pos[v++] = x;
-    pos[v++] = y;
-    pos[v++] = RIBBON_W / 2;
-  };
-  for (let i = 0; i < TAIL; i++) {
-    const u = i / TAIL;
-    put(lerp(ex, ox, u), lerp(ey, oy, u));
-  }
-  // 外端から内へ
-  for (let i = 0; i <= SEG; i++) {
-    const f = phi * (1 - i / SEG);
-    const r = CURL_A + CURL_B * f;
-    const th = THETA_OUT - (phi - f);
-    put(r * Math.cos(th), r * Math.sin(th));
-  }
-}
-
-function ribbonGeometry(): THREE.BufferGeometry {
-  const rows = TAIL + SEG + 1;
-  const geo = new THREE.BufferGeometry();
-  const pos = new Float32Array(rows * 2 * 3);
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  const idx: number[] = [];
-  for (let i = 0; i < rows - 1; i++) {
-    const a = i * 2;
-    idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
-  }
-  geo.setIndex(idx);
-  return geo;
-}
-
-/** 転がり落ちた先 [x, y, z, yaw]。下に 4 つ、上に 2 つ。低く崩れた小山にする */
-const PILE: [number, number, number, number][] = (() => {
-  const r = FULL_R;
-  const x = X1 + 0.3 + r;
-  return [
-    [x + 1.9, r, -0.35, 0.25],
-    [x + 1.05, r, 0.55, -0.2],
-    [x + 0.15, r, -0.2, 0.1],
-    [x + 1.6, r, 1.35, 0.4],
-    [x + 1.3, r * 2.55, 0.15, -0.35],
-    [x + 0.55, r * 2.45, 0.9, 0.3],
-  ];
-})();
-
-// --- 状態 -------------------------------------------------------------------
+/** サイコロごとの [離れる時刻の遅れ, vx, vz, 休む高さ, 回転 x, yaw, 回転 z] */
+const FALL = new Float32Array(CUBES * 7);
 
 interface Tray {
   group: THREE.Group;
   mat: THREE.MeshStandardMaterial;
+  grooveMat: THREE.MeshStandardMaterial;
   body: THREE.Mesh;
-  slab: THREE.Mesh;
+  cubes: THREE.InstancedMesh;
+  grooves: THREE.InstancedMesh;
 }
 
 let cur: Tray;
 let nxt: Tray;
-let active: THREE.Mesh;
-let activeGeo: THREE.BufferGeometry;
-let chips: THREE.Mesh[] = [];
-let blade: THREE.Group;
-let yawJitter: number[] = [];
+let cutter: THREE.Group;
+let knife: THREE.Group;
 
+const dummy = new THREE.Object3D();
 const color = new THREE.Color();
 
-let slideTick = ticker();
-let fallTick = ticker();
+let lineTick = ticker();
+let rowTick = ticker();
 let swapTick = ticker();
-let step = 0;
 
 function makeTray(root: THREE.Group): Tray {
   const group = new THREE.Group();
   root.add(group);
 
   const board = new THREE.Mesh(
-    new THREE.BoxGeometry(BOARD_X1 - BOARD_X0, BOARD_H, BOARD_Z),
-    new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.55, metalness: 0.2 }),
+    new THREE.BoxGeometry(BOARD_X1 - BOARD_X0, BOARD_H, BOARD_Z1 - BOARD_Z0),
+    new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.6, metalness: 0.15 }),
   );
-  board.position.set((BOARD_X0 + BOARD_X1) / 2, -BOARD_H / 2, 0);
+  board.position.set((BOARD_X0 + BOARD_X1) / 2, -BOARD_H / 2, (BOARD_Z0 + BOARD_Z1) / 2);
   group.add(board);
 
-  const mat = new THREE.MeshStandardMaterial({
-    roughness: 0.16,
-    metalness: 0.0,
-    side: THREE.DoubleSide,
-  });
+  const mat = new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0.0 });
+  const grooveMat = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0.0 });
 
-  // 本体は角を丸めた固定の形。削るたびに縮めるのではなく、板の中へ沈めて低くする
-  const bodyGeo = new RoundedBoxGeometry(FULL_L, H0, SZ, 4, ROUND);
-  bodyGeo.translate(FULL_L / 2, H0 / 2, 0);
+  // 本体: 背面から「いま削っている層」の手前までの直方体。z のスケールで奥行きを変える
+  const bodyGeo = new THREE.BoxGeometry(S, S, 1);
+  bodyGeo.translate(0, S / 2, 0.5); // 背面を原点に
   const body = new THREE.Mesh(bodyGeo, mat);
-  body.position.x = X0;
+  body.position.z = -S / 2;
   group.add(body);
 
-  // これから削る 1 層。平らな上面に重ねる
-  const slabGeo = new THREE.BoxGeometry(1, 1, STRIP_W);
-  slabGeo.translate(0.5, 0.5, 0); // 左下の辺を原点に。x と y のスケールで伸ばす
-  const slab = new THREE.Mesh(slabGeo, mat);
-  group.add(slab);
+  const cubes = new THREE.InstancedMesh(new THREE.BoxGeometry(CELL, CELL, CELL), mat, CUBES);
+  cubes.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  group.add(cubes);
 
-  return { group, mat, body, slab };
-}
+  // 切り込み: 縦 7 本・横 7 本の細い溝。長さを伸ばして「引いている」ように見せる
+  const grooves = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), grooveMat, LINES);
+  grooves.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  group.add(grooves);
 
-/** 1 本の石鹸の姿。k = いま何回目のストロークか（K なら入れ替え中）、p = ストローク内の秒 */
-function poseTray(tray: Tray, k: number, bx: number): void {
-  const hk = H0 - k * D;
-  if (k >= K) {
-    tray.body.position.y = hk - H0;
-    tray.slab.visible = false;
-    return;
-  }
-  tray.body.position.y = hk - D - H0;
-  const end = X1 - ROUND * 0.5;
-  const sx = Math.min(end, Math.max(X0 + ROUND * 0.5, bx));
-  const len = end - sx;
-  tray.slab.visible = len > 1e-3;
-  tray.slab.position.set(sx, hk - D, 0);
-  tray.slab.scale.set(Math.max(len, 1e-3), D, 1);
+  return { group, mat, grooveMat, body, cubes, grooves };
 }
 
 function soapColor(tray: Tray, cycle: number, t: number): void {
   const i = ((cycle % SOAP_N.length) + SOAP_N.length) % SOAP_N.length;
-  ember(color, SOAP_N[i], SOAP_SHIFT[i] + drift(t) * 0.5, SOAP_GLOW);
-  tray.mat.color.copy(color).lerp(SOAP_GREY, SOAP_GREY_MIX);
+  ember(color, SOAP_N[i], SOAP_SHIFT[i] + drift(t) * 0.5);
+  color.lerp(SOAP_PALE, SOAP_PALE_MIX);
+  tray.mat.color.copy(color);
+  tray.grooveMat.color.copy(color).multiplyScalar(GROOVE_DARK);
 }
 
-/** 刃先の位置 [x, y]（ストローク k、ストローク内の秒 p） */
-function bladeAt(k: number, p: number): [number, number] {
-  const cut = H0 - k * D - D;
-  const xs = HOVER_X;
-  if (p < T_DOWN) {
-    const u = smooth(p / T_DOWN);
-    return [lerp(xs, X0, u), lerp(HOVER_Y, cut, u)];
+/** 切り込み i 本目の [始点 x, 始点 y, 終点 x, 終点 y]。縦は上から下、横は左から右 */
+function lineEnds(i: number): [number, number, number, number] {
+  if (i < GRID - 1) {
+    const x = -S / 2 + (i + 1) * CELL;
+    return [x, S, x, 0];
   }
-  if (p < T_END) {
-    const u = smooth((p - T_DOWN) / (T_END - T_DOWN));
-    return [lerp(X0, X1, u), cut];
-  }
-  const u = (p - T_END) / (P - T_END);
-  const x = lerp(X1, xs, smooth((u - 0.2) / 0.8));
-  const y = lerp(cut, HOVER_Y, smooth(u / 0.35));
-  return [x, y];
+  const y = S - (i - (GRID - 1) + 1) * CELL;
+  return [-S / 2, y, S / 2, y];
 }
 
-/** 段階ごとの位相。ticker に渡すと、その出来事の回数を数えられる */
-const stepPhase = (t: number, offset: number): number => {
+/**
+ * 1 本の石鹸の姿。layer = いま削っている層（LAYERS なら入れ替え中）、p = 層の中の秒。
+ */
+function poseTray(tray: Tray, layer: number, p: number): void {
+  const L = Math.min(layer, LAYERS);
+  // 本体は「いまの層」の背後まで。入れ替え中は削り終えた面まで
+  const bodyFront = L < LAYERS ? frontZ(L) - CELL : frontZ(LAYERS);
+  tray.body.scale.z = bodyFront + S / 2;
+
+  const sliceY = S - Math.min(1, Math.max(0, (p - T_SLICE0) / (T_SLICE1 - T_SLICE0))) * S;
+  const slicing = L < LAYERS && p >= T_SLICE0;
+
+  for (let j = 0; j < LAYERS; j++) {
+    for (let r = 0; r < GRID; r++) {
+      for (let c = 0; c < GRID; c++) {
+        const idx = j * CELLS + r * GRID + c;
+        const x0 = -S / 2 + (c + 0.5) * CELL;
+        const y0 = S - (r + 0.5) * CELL;
+        const z0 = frontZ(j) - CELL / 2;
+        dummy.rotation.set(0, 0, 0);
+
+        if (j > L || (j === L && L >= LAYERS)) {
+          dummy.position.set(0, -10, 0);
+          dummy.scale.setScalar(0.0001);
+        } else if (j === L && !slicing) {
+          // 削ぐ前: 隙間なく詰めて、1 枚の面に見せる
+          dummy.position.set(x0, y0, z0);
+          dummy.scale.setScalar(1);
+        } else {
+          const f = idx * 7;
+          // 刃が段の下端を通り過ぎた瞬間に離れる
+          const release = T_SLICE0 + ((r + 1) / GRID) * (T_SLICE1 - T_SLICE0) + FALL[f];
+          const tau = j < L ? 99 : p - release;
+          const g = 1 - (j === L ? smooth((S - sliceY - r * CELL) / CELL) : 1);
+          dummy.scale.setScalar(lerp(GAP, 1, g));
+          if (tau <= 0) {
+            dummy.position.set(x0, y0, z0);
+          } else {
+            const yRest = FALL[f + 3];
+            const tl = Math.sqrt((2 * Math.max(0, y0 - yRest)) / GRAVITY);
+            const tc = Math.min(tau, tl);
+            const u = tl > 0 ? tc / tl : 1;
+            dummy.position.set(
+              x0 + FALL[f + 1] * tc,
+              Math.max(yRest, y0 - 0.5 * GRAVITY * tc * tc),
+              z0 + FALL[f + 2] * tc,
+            );
+            dummy.rotation.set(FALL[f + 4] * u, FALL[f + 5] * u, FALL[f + 6] * u);
+          }
+        }
+        dummy.updateMatrix();
+        tray.cubes.setMatrixAt(idx, dummy.matrix);
+      }
+    }
+  }
+  tray.cubes.instanceMatrix.needsUpdate = true;
+
+  // 切り込みの溝
+  const zf = L < LAYERS ? frontZ(L) : 0;
+  for (let i = 0; i < LINES; i++) {
+    const [ax, ay, bx] = lineEnds(i);
+    const u = L < LAYERS && !slicing ? smooth((p - T_SCORE0 - i * LINE_DUR) / LINE_DRAW) : 0;
+    const len = u * S;
+    if (len < 1e-3) {
+      dummy.position.set(0, -10, 0);
+      dummy.scale.setScalar(0.0001);
+    } else if (ax === bx) {
+      dummy.position.set(ax, ay - len / 2, zf + GROOVE_D / 2);
+      dummy.scale.set(GROOVE_W, len, GROOVE_D);
+    } else {
+      dummy.position.set(ax + len / 2, ay, zf + GROOVE_D / 2);
+      dummy.scale.set(len, GROOVE_W, GROOVE_D);
+    }
+    dummy.rotation.set(0, 0, 0);
+    dummy.updateMatrix();
+    tray.grooves.setMatrixAt(i, dummy.matrix);
+  }
+  tray.grooves.instanceMatrix.needsUpdate = true;
+}
+
+/** カッターの刃先の位置（層 L、層の中の秒 p） */
+function cutterAt(L: number, p: number): [number, number, number] {
+  const zf = frontZ(L);
+  const [sx, sy] = lineEnds(0);
+  if (p < T_SCORE0) {
+    const u = smooth(p / T_SCORE0);
+    return [sx, lerp(TOOL_UP, sy, u), zf + 0.25 * (1 - u)];
+  }
+  if (p < T_SCORE1) {
+    const i = Math.floor((p - T_SCORE0) / LINE_DUR);
+    const q = p - T_SCORE0 - i * LINE_DUR;
+    const [ax, ay, bx, by] = lineEnds(i);
+    if (q < LINE_DRAW) {
+      const u = smooth(q / LINE_DRAW);
+      return [lerp(ax, bx, u), lerp(ay, by, u), zf];
+    }
+    // 次の線の始点へ、刃先を浮かせて移る
+    const [nx, ny] = i + 1 < LINES ? lineEnds(i + 1) : [bx, by + 1.5];
+    const u = smooth((q - LINE_DRAW) / (LINE_DUR - LINE_DRAW));
+    return [lerp(bx, nx, u), lerp(by, ny, u), zf + Math.sin(Math.PI * u) * 0.3];
+  }
+  const u = smooth((p - T_SCORE1) / 0.6);
+  return [S / 2, lerp(S - (GRID - 1) * CELL + 1.5, TOOL_UP, u), zf + 0.3];
+}
+
+/** 包丁の刃先の高さ（層の中の秒 p） */
+function knifeY(p: number): number {
+  if (p < T_SLICE0 - 0.6) return TOOL_UP;
+  if (p < T_SLICE0) return lerp(TOOL_UP, S + 0.02, smooth((p - (T_SLICE0 - 0.6)) / 0.6));
+  // 削いでいる間は等速。サイコロが離れる時刻と刃の位置を一致させる
+  if (p < T_SLICE1) return S - ((p - T_SLICE0) / (T_SLICE1 - T_SLICE0)) * S;
+  return lerp(0, TOOL_UP, smooth((p - T_SLICE1) / (P - T_SLICE1)));
+}
+
+/** 出来事が起きた回数（単調に増える）。ticker に渡すと鳴らす回数が分かる */
+function eventPhase(t: number, count: (p: number) => number, perLayer: number): number {
   const c = Math.floor(t / CYCLE);
   const tc = t - c * CYCLE;
-  return c * K + Math.min(K, Math.max(0, (tc - offset) / P + 1));
-};
+  const L = Math.floor(tc / P);
+  if (L >= LAYERS) return (c + 1) * LAYERS * perLayer;
+  return (c * LAYERS + L) * perLayer + count(tc - L * P);
+}
 
 export const soapCarving: SceneModule = {
   name: 'Soap Carving',
-  desc: '刃が石鹸の上面を滑り、削りくずがくるくる巻いて脇に積み上がっていく。',
-  camera: { pos: [3.5, 7.2, 10.5], target: [0.3, 1.1, 0] },
+  desc: '石鹸の面に碁盤の目を刻み、包丁で削ぐと小さなサイコロがぽろぽろ崩れ落ちる。',
+  camera: { pos: [6.2, 7.4, 8.6], target: [0, 1.1, 0.8] },
 
   build(root) {
-    slideTick = ticker();
-    fallTick = ticker();
+    lineTick = ticker();
+    rowTick = ticker();
     swapTick = ticker();
-    step = 0;
+
+    let s = 0.583;
+    const rnd = (): number => (s = (s * 9301 + 0.49297) % 1);
+    for (let i = 0; i < CUBES; i++) {
+      const f = i * 7;
+      const j = Math.floor(i / CELLS);
+      FALL[f] = rnd() * 0.12;
+      FALL[f + 1] = (rnd() - 0.5) * 0.9;
+      FALL[f + 2] = 0.5 + rnd() * 1.4;
+      FALL[f + 3] = CELL / 2 + rnd() * 0.12 * (j + 1);
+      // 休むときは面が下を向くよう、x と z の回転は 90° の倍数
+      FALL[f + 4] = (Math.PI / 2) * Math.floor(rnd() * 3);
+      FALL[f + 5] = (rnd() - 0.5) * 1.6;
+      FALL[f + 6] = (Math.PI / 2) * Math.floor(rnd() * 3 - 1);
+    }
 
     cur = makeTray(root);
     nxt = makeTray(root);
 
-    activeGeo = ribbonGeometry();
-    active = new THREE.Mesh(activeGeo, cur.mat);
-    cur.group.add(active);
+    const steel = new THREE.MeshStandardMaterial({ color: 0xe2d6cc, roughness: 0.25, metalness: 0.25 });
+    const grip = new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.7, metalness: 0.05 });
 
-    const fullGeo = ribbonGeometry();
-    writeRibbon(fullGeo.getAttribute('position').array as Float32Array, FULL_L);
-    fullGeo.computeVertexNormals();
-    chips = [];
-    for (let k = 0; k < K; k++) {
-      const m = new THREE.Mesh(fullGeo, cur.mat);
-      m.rotation.order = 'YXZ';
-      cur.group.add(m);
-      chips.push(m);
-    }
-
-    let s = 0.417;
-    const rnd = (): number => (s = (s * 9301 + 0.49297) % 1);
-    yawJitter = Array.from({ length: K }, () => (rnd() - 0.5) * 0.16);
-
-    // 刃: 刃先が原点、+x が刃の背へ向かう板。背に取っ手を渡す
-    blade = new THREE.Group();
-    const steel = new THREE.MeshStandardMaterial({ color: 0xf0ddcc, roughness: 0.14, metalness: 0.45 });
-    const plateGeo = new THREE.BoxGeometry(BLADE_LEN, 0.035, BLADE_W);
-    plateGeo.translate(BLADE_LEN / 2, 0, 0);
-    blade.add(new THREE.Mesh(plateGeo, steel));
-    const wood = new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.7, metalness: 0.05 });
-    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, BLADE_W + 0.9, 20), wood);
+    // カッター: 刃先が原点。刃は手前（+z）の斜め上へ伸び、その先に柄
+    cutter = new THREE.Group();
+    const arm = new THREE.Group();
+    arm.rotation.x = -0.6;
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.14, 0.6), steel);
+    blade.position.set(0, 0.04, 0.3);
+    arm.add(blade);
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.8, 16), grip);
     handle.rotation.x = Math.PI / 2;
-    handle.position.x = BLADE_LEN;
-    blade.add(handle);
-    blade.rotation.z = Math.PI - BLADE_LEAN;
-    root.add(blade);
+    handle.position.set(0, 0.04, 1.5);
+    arm.add(handle);
+    cutter.add(arm);
+    root.add(cutter);
+
+    // 包丁: 刃先（下辺）が原点の薄い板。柄は右へ
+    knife = new THREE.Group();
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(S + 1.0, KNIFE_H, 0.012), steel);
+    plate.position.set(0.2, KNIFE_H / 2, 0);
+    knife.add(plate);
+    const kHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 1.6, 16), grip);
+    kHandle.rotation.z = Math.PI / 2;
+    kHandle.position.set(0.2 + (S + 1.0) / 2 + 0.8, KNIFE_H * 0.7, 0);
+    knife.add(kHandle);
+    root.add(knife);
   },
 
   update(t) {
     const c = Math.floor(t / CYCLE);
     const tc = t - c * CYCLE;
-    const k = Math.min(K, Math.floor(tc / P));
-    const p = tc - k * P;
+    const L = Math.min(LAYERS, Math.floor(tc / P));
+    const p = tc - L * P;
 
     soapColor(cur, c, t);
     soapColor(nxt, c + 1, t);
 
-    // 入れ替え
-    const e = k >= K ? smooth((tc - K * P) / T_SWAP) : 0;
+    const e = L >= LAYERS ? smooth((tc - LAYERS * P) / T_SWAP) : 0;
     cur.group.position.x = e * SWAP_DIST;
     nxt.group.position.x = -SWAP_DIST + e * SWAP_DIST;
     nxt.group.visible = e > 0;
-    poseTray(nxt, 0, X0);
 
-    // 刃
-    let bx = X0;
-    let by = HOVER_Y;
-    if (k < K) [bx, by] = bladeAt(k, p);
-    else bx = HOVER_X;
-    blade.position.set(bx, by, 0);
-    const sliding = k < K && p >= T_DOWN && p < T_END;
-    poseTray(cur, k, p < T_DOWN ? X0 : p < T_END ? bx : X1);
+    poseTray(cur, L, p);
+    poseTray(nxt, 0, 0);
 
-    // 巻いている最中の削りくず
-    active.visible = sliding && bx - X0 > 0.02;
-    if (active.visible) {
-      const L = bx - X0;
-      const r = curlR(L);
-      writeRibbon(activeGeo.getAttribute('position').array as Float32Array, L);
-      activeGeo.getAttribute('position').needsUpdate = true;
-      activeGeo.computeVertexNormals();
-      activeGeo.computeBoundingSphere();
-      active.position.set(bx + 0.85 * r, H0 - k * D + r, 0);
-    }
-
-    // 巻き終わった削りくず: 転がり落ちて積み上がる
-    for (let j = 0; j < K; j++) {
-      const m = chips[j];
-      const done = j < k || (j === k && p >= T_END);
-      m.visible = done;
-      if (!done) continue;
-      const sx = X1 + 0.85 * FULL_R;
-      const sy = H0 - j * D + FULL_R;
-      const [rx, ry, rz, yaw] = PILE[j];
-      const u = j < k ? 1 : Math.min(1, (p - T_END) / T_FALL);
-      const ue = smooth(u);
-      const x = lerp(sx, rx, ue);
-      const y = lerp(sy, ry, u * u) + 0.45 * 4 * u * (1 - u);
-      m.position.set(x, y, rz * ue);
-      m.rotation.y = (yaw + yawJitter[j]) * ue;
-      m.rotation.z = -(x - sx) / FULL_R;
+    if (L < LAYERS) {
+      const [x, y, z] = cutterAt(L, p);
+      cutter.position.set(x, y, z);
+      knife.position.set(0, knifeY(p), frontZ(L) - CELL);
+    } else {
+      cutter.position.set(S / 2, TOOL_UP, frontZ(0));
+      knife.position.set(0, TOOL_UP, frontZ(0) - CELL);
     }
   },
 
   sound(t, _dt, sfx) {
-    // 刃が石鹸に当たって滑り出す
-    for (let n = slideTick(stepPhase(t, T_DOWN)); n > 0; n--) {
-      step++;
-      sfx.air({ gain: 0.22, decay: 2.4, freq: 1400, q: 0.9, sweep: 0.7 });
+    // 切り込みを 1 本引くごと
+    const lines = (p: number): number =>
+      Math.min(LINES, Math.max(0, Math.floor((p - T_SCORE0) / LINE_DUR + 1)));
+    for (let n = lineTick(eventPhase(t, lines, LINES)); n > 0; n--) {
+      sfx.air({ gain: 0.12, decay: 0.25, freq: 2600, q: 2.2 });
     }
-    // 削りくずが積み山に落ちる
-    for (let n = fallTick(stepPhase(t, T_END + T_FALL * 0.8)); n > 0; n--) {
-      sfx.pluck(tone(9 + (step % 4)), { gain: 0.22, decay: 1.2, pan: 0.35 });
+    // サイコロが 1 段崩れ落ちるごと
+    const rows = (p: number): number =>
+      Math.min(GRID, Math.max(0, Math.floor(((p - T_SLICE0) / (T_SLICE1 - T_SLICE0)) * GRID)));
+    for (let n = rowTick(eventPhase(t, rows, GRID)); n > 0; n--) {
+      const k = Math.floor(t * 7) % 5;
+      sfx.pluck(tone(10 + k), { gain: 0.16, decay: 0.6, pan: (k - 2) * 0.15 });
     }
     // 板ごと入れ替わる
-    for (let n = swapTick((t - K * P) / CYCLE + 1); n > 0; n--) {
+    for (let n = swapTick((t - LAYERS * P) / CYCLE + 1); n > 0; n--) {
       sfx.drop(tone(2), { gain: 0.3, decay: 0.9, bend: 0.8 });
     }
   },
