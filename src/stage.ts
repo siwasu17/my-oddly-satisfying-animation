@@ -64,9 +64,12 @@ export function createStage(container: HTMLElement): Stage {
     antialias: true,
     powerPreference: 'high-performance',
   });
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  // 就寝前に眺める前提なので、全体の明るさは控えめに
-  renderer.toneMappingExposure = 0.92;
+  // ACES は明るい暖色を黄〜白へ寄せて飛ばすので、色相を保つ Neutral を使う。
+  // AgX は中間調が持ち上がって全体が灰色がかるため見送った。
+  renderer.toneMapping = THREE.NeutralToneMapping;
+  // 就寝前に眺める前提なので、全体の明るさは控えめに。
+  // Neutral は ACES より中間調が明るく出るので、ACES 0.92 と平均輝度が揃う 0.8 にしてある
+  renderer.toneMappingExposure = 0.8;
   // 透過（transmission）を使うのはピタゴラ装置の珠と水面くらい。その 1 パスのために
   // 毎フレーム全画面をもう一度描くのは重いので、半分の解像度で足りるようにする。
   renderer.transmissionResolutionScale = 0.5;
