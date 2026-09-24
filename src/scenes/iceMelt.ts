@@ -46,7 +46,7 @@ const DRIP_AMP = 0.05;
 const RIP_SPEED = 1.9;
 const RIP_WIDTH = 1.2;
 const RIP_K = 2.2;
-const RIP_LIFE = 6.5;
+const RIP_LIFE = 8;
 /** 水面を割る細かさ */
 const SEG = 88;
 
@@ -161,10 +161,10 @@ export const iceMelt: SceneModule = {
       wg,
       new THREE.MeshStandardMaterial({
         color: ember(new THREE.Color(), 0.22, 0, -0.1),
-        roughness: 0.16,
-        metalness: 0.75,
+        roughness: 0.1,
+        metalness: 0.05,
         envMap: sky,
-        envMapIntensity: 0.9,
+        envMapIntensity: 1.6,
       }),
     );
     root.add(water);
@@ -176,15 +176,16 @@ export const iceMelt: SceneModule = {
       const m = new THREE.Mesh(
         bergGeometry(0.173 + i * 0.097),
         new THREE.MeshPhysicalMaterial({
-          roughness: 0.14,
+          roughness: 0.12,
           metalness: 0,
+          transmission: 0.7,
+          thickness: 1.2,
+          ior: 1.31,
           clearcoat: 1,
-          clearcoatRoughness: 0.05,
+          clearcoatRoughness: 0.04,
           envMap: sky,
-          envMapIntensity: 0.7,
+          envMapIntensity: 1.2,
           flatShading: true,
-          transparent: true,
-          opacity: 0.88,
         }),
       );
       root.add(m);
@@ -193,9 +194,9 @@ export const iceMelt: SceneModule = {
       const foam = new THREE.Mesh(
         new THREE.RingGeometry(0.72, 1.05, 40, 1),
         new THREE.MeshBasicMaterial({
-          color: ember(new THREE.Color(), 0.8, 0, -0.3),
+          color: ember(new THREE.Color(), 0.9, 0, 0).lerp(ICE_TINT, 0.5),
           transparent: true,
-          opacity: 0.35,
+          opacity: 0.22,
           depthWrite: false,
         }),
       );
@@ -210,8 +211,15 @@ export const iceMelt: SceneModule = {
       new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.95, metalness: 0 }),
     );
     bank.rotation.x = -Math.PI / 2;
-    bank.position.y = 0.08;
+    bank.position.y = 0.4; // 水面のうねりの山より上に置き、池の輪郭を円に保つ
     root.add(bank);
+    // 岸の内壁。持ち上げた岸と水面のあいだのすき間を塞ぐ
+    const wall = new THREE.Mesh(
+      new THREE.CylinderGeometry(R, R, 0.6, 128, 1, true),
+      new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.95, metalness: 0, side: THREE.BackSide }),
+    );
+    wall.position.y = 0.1;
+    root.add(wall);
   },
 
   update(t) {
@@ -275,7 +283,7 @@ export const iceMelt: SceneModule = {
     for (let v = 0; v < arr.length; v += 3) {
       const x = base[v];
       const z = base[v + 2];
-      let h = 0.02 + 0.06 * open * (Math.sin(x * 0.55 + t * 0.7) + Math.sin(z * 0.7 - t * 0.55 + x * 0.3));
+      let h = 0.02 + 0.08 * open * (Math.sin(x * 0.55 + t * 0.7) + Math.sin(z * 0.7 - t * 0.55 + x * 0.3));
       for (let a = 0; a < act.length; a += 5) {
         const age = act[a + 3];
         const d = Math.hypot(x - act[a], z - act[a + 1]) - act[a + 4];
