@@ -26,7 +26,7 @@ const PITCH = 1.75;
 const PLATE = 1.02;
 const CHIP = 0.42;
 /** 欠片を置く割合 */
-const CHIP_RATE = 0.7;
+const CHIP_RATE = 0.22;
 /** 板の角の数（少なめにして不揃いな多角形に見せる） */
 const SIDES = 7;
 /** 氷の厚みと、水面から出ている高さ */
@@ -46,7 +46,7 @@ const FREEZE_DUR = 3.5;
 const GAP = 0.14;
 
 /** 波紋: 振幅 / 広がる速さ / 波束の幅 / 波数 / 寿命 */
-const RIP_AMP = 0.1;
+const RIP_AMP = 0.14;
 const RIP_SPEED = 1.9;
 const RIP_WIDTH = 1.3;
 const RIP_K = 2.0;
@@ -91,8 +91,8 @@ const layout: number[] = [];
       const z = r * h;
       put(x + (rnd() - 0.5) * 0.3, z + (rnd() - 0.5) * 0.3, PLATE * (0.8 + rnd() * 0.4));
       // 3 枚の板に挟まれた三角のすき間（上向きと下向き）に欠片を置く
-      if (rnd() < CHIP_RATE) put(x + PITCH / 2, z + h / 3, CHIP * (0.7 + rnd() * 0.6));
-      if (rnd() < CHIP_RATE) put(x + PITCH / 2, z - h / 3, CHIP * (0.7 + rnd() * 0.6));
+      if (rnd() < CHIP_RATE) put(x + PITCH / 2, z + h / 3, CHIP * (0.85 + rnd() * 0.3));
+      if (rnd() < CHIP_RATE) put(x + PITCH / 2, z - h / 3, CHIP * (0.85 + rnd() * 0.3));
     }
   }
 }
@@ -130,9 +130,9 @@ export const iceMelt: SceneModule = {
     water = new THREE.Mesh(
       wg,
       new THREE.MeshStandardMaterial({
-        color: ember(new THREE.Color(), 0.42, 0, -0.2),
-        roughness: 0.3,
-        metalness: 0.5,
+        color: ember(new THREE.Color(), 0.3, 0, -0.26),
+        roughness: 0.14,
+        metalness: 0.8,
       }),
     );
     root.add(water);
@@ -144,9 +144,9 @@ export const iceMelt: SceneModule = {
       metalness: 0,
       clearcoat: 1,
       clearcoatRoughness: 0.06,
-      emissive: 0x2a211b,
+      emissive: 0x0c0907,
       transparent: true,
-      opacity: 0.86,
+      opacity: 0.74,
     });
     ice = new THREE.InstancedMesh(ig, im, COUNT);
     ice.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -213,8 +213,8 @@ export const iceMelt: SceneModule = {
       ice.setMatrixAt(i, dummy.matrix);
 
       // ほぼ白。板ごとに少しだけ濃淡を変えて、厚みの違う氷に見せる
-      ember(color, 0.95, hue * 0.4, -0.02);
-      color.lerp(ICE_TINT, 0.62 + 0.25 * frost - 0.12 * Math.sin(ph * 3.1) ** 2);
+      ember(color, 0.88, hue * 0.4, -0.12);
+      color.lerp(ICE_TINT, 0.3 + 0.15 * frost - 0.1 * Math.sin(ph * 3.1) ** 2);
       ice.setColorAt(i, color);
     }
     ice.instanceMatrix.needsUpdate = true;
@@ -236,7 +236,7 @@ export const iceMelt: SceneModule = {
     for (let v = 0; v < arr.length; v += 3) {
       const x = base[v];
       const z = base[v + 2];
-      let h = 0.05 * open * (Math.sin(x * 0.55 + t * 0.7) + Math.sin(z * 0.7 - t * 0.55 + x * 0.3));
+      let h = 0.07 * open * (Math.sin(x * 0.55 + t * 0.7) + Math.sin(z * 0.7 - t * 0.55 + x * 0.3));
       for (let a = 0; a < act.length; a += 2) {
         const o = act[a] * STRIDE;
         const age = act[a + 1];
