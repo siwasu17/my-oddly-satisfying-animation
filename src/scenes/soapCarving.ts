@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import type { SceneModule } from '../types.ts';
 import { tone, ticker } from '../audio.ts';
 import { SURFACE, ember, drift } from '../palette.ts';
@@ -8,7 +9,7 @@ import { SURFACE, ember, drift } from '../palette.ts';
  *
  * 板にのせた石鹸の角ブロックの上面を、両手持ちの刃が端から端へ滑っていく。
  * 刃の前で薄い削りくずがくるくると巻き上がり、刃が通った跡には一段低い平らな面が残る。
- * 巻き終わった削りくずは脇へ転がり落ち、丸太のようにピラミッド状に積み上がる。
+ * 巻き終わった削りくずは脇へ転がり落ち、小さな山になっていく。
  * 6 本積んだら板ごと右へ流れ、左から色違いの新しい石鹸が入ってきて繰り返す（28 秒で一巡）。
  * 音は削っている間の擦れる息と、削りくずが落ちるときの柔らかい爪弾き。
  */
@@ -17,7 +18,7 @@ import { SURFACE, ember, drift } from '../palette.ts';
 
 /** 1 ストロークの秒数 */
 const P = 4;
-/** 1 本の石鹸で削る回数（= 積む削りくずの本数。ピラミッドなので 6 固定） */
+/** 1 本の石鹸で削る回数（= 積む削りくずの本数。PILE の数と揃える） */
 const K = 6;
 /** 板ごと入れ替える秒数 */
 const T_SWAP = 4;
@@ -32,41 +33,49 @@ const T_FALL = 0.8; // 削りくずが転がり落ちる時間
 /** 石鹸の寸法。刃は x 方向へ滑る */
 const X0 = -3.0;
 const X1 = 1.4;
-const SZ = 3.0;
-const H0 = 2.4;
+const SZ = 1.6;
+const H0 = 2.0;
+/** 角の丸み */
+const ROUND = 0.16;
 /** 1 回に削る厚み */
-const D = 0.12;
+const D = 0.1;
+/** 削る帯の幅（丸めた角の内側の平らなところ） */
+const STRIP_W = SZ - 2 * ROUND + 0.02;
 
 /** 板の上面は y = 0 */
-const BOARD_X0 = -3.9;
-const BOARD_X1 = 4.7;
-const BOARD_Z = 4.4;
+const BOARD_X0 = -4.0;
+const BOARD_X1 = 5.0;
+const BOARD_Z = 3.8;
 const BOARD_H = 0.3;
 
 /** 入れ替えで板が流れる距離 */
 const SWAP_DIST = 17;
 
 /** 刃が待機する高さ */
-const HOVER_Y = H0 + 1.0;
+const HOVER_Y = H0 + 0.55;
+/** 刃が待機する x（石鹸の左端より手前） */
+const HOVER_X = X0 - 1.2;
 /** 刃の傾き（水平からの角度） */
 const BLADE_LEAN = (24 * Math.PI) / 180;
-const BLADE_LEN = 1.6;
-const BLADE_W = 3.6;
+const BLADE_LEN = 0.85;
+const BLADE_W = 2.2;
 
 /** 削りくずの渦巻き: r = CURL_A + CURL_B * φ */
-const CURL_A = 0.1;
-const CURL_B = 0.0136;
+const CURL_A = 0.15;
+const CURL_B = 0.0227;
 /** 削った長さのうち、巻きに回る割合（細く軽い巻きにするため） */
-const CURL_SQUEEZE = 0.45;
-const RIBBON_W = SZ - 0.12;
+const CURL_SQUEEZE = 0.69;
+const RIBBON_W = STRIP_W - 0.04;
 const SEG = 160;
 const TAIL = 6;
 /** 渦巻きの外端の角度（中心から見て左下） */
 const THETA_OUT = (-150 * Math.PI) / 180;
 
 /** 石鹸の色（ember の n）。一巡ごとに順に替わる */
-const SOAP_N = [0.9, 0.84, 0.95];
+const SOAP_N = [0.95, 0.88, 1.0];
 const SOAP_SHIFT = [0.0, 0.03, -0.025];
+/** 明度の持ち上げ。白寄りのクリームにする */
+const SOAP_GLOW = 0.14;
 
 // --- 形の計算 ---------------------------------------------------------------
 
@@ -131,17 +140,17 @@ function ribbonGeometry(): THREE.BufferGeometry {
   return geo;
 }
 
-/** 積み上げの位置 [x, y, yaw]。下段 3 本と上段 3 本を交差させて、薪の俵積みに見せない */
-const PILE: [number, number, number][] = (() => {
+/** 転がり落ちた先 [x, y, z, yaw]。下に 4 つ、上に 2 つ。低く崩れた小山にする */
+const PILE: [number, number, number, number][] = (() => {
   const r = FULL_R;
-  const x = X1 + 0.35 + r;
+  const x = X1 + 0.3 + r;
   return [
-    [x + 1.3, r, 0.3],
-    [x + 0.7, r, 0.22],
-    [x + 0.08, r, 0.36],
-    [x + 1.05, r * 2.9, -0.42],
-    [x + 0.4, r * 2.9, -0.3],
-    [x + 0.75, r * 4.7, 0.05],
+    [x + 1.9, r, -0.35, 0.25],
+    [x + 1.05, r, 0.55, -0.2],
+    [x + 0.15, r, -0.2, 0.1],
+    [x + 1.6, r, 1.35, 0.4],
+    [x + 1.3, r * 2.55, 0.15, -0.35],
+    [x + 0.55, r * 2.45, 0.9, 0.3],
   ];
 })();
 
@@ -181,18 +190,22 @@ function makeTray(root: THREE.Group): Tray {
   group.add(board);
 
   const mat = new THREE.MeshStandardMaterial({
-    roughness: 0.3,
+    roughness: 0.16,
     metalness: 0.0,
     side: THREE.DoubleSide,
   });
 
-  const boxGeo = new THREE.BoxGeometry(1, 1, SZ);
-  boxGeo.translate(0.5, 0.5, 0); // 左下の辺を原点に。x と y のスケールで伸ばす
-  const body = new THREE.Mesh(boxGeo, mat);
+  // 本体は角を丸めた固定の形。削るたびに縮めるのではなく、板の中へ沈めて低くする
+  const bodyGeo = new RoundedBoxGeometry(FULL_L, H0, SZ, 4, ROUND);
+  bodyGeo.translate(FULL_L / 2, H0 / 2, 0);
+  const body = new THREE.Mesh(bodyGeo, mat);
   body.position.x = X0;
   group.add(body);
 
-  const slab = new THREE.Mesh(boxGeo, mat);
+  // これから削る 1 層。平らな上面に重ねる
+  const slabGeo = new THREE.BoxGeometry(1, 1, STRIP_W);
+  slabGeo.translate(0.5, 0.5, 0); // 左下の辺を原点に。x と y のスケールで伸ばす
+  const slab = new THREE.Mesh(slabGeo, mat);
   group.add(slab);
 
   return { group, mat, body, slab };
@@ -202,13 +215,14 @@ function makeTray(root: THREE.Group): Tray {
 function poseTray(tray: Tray, k: number, bx: number): void {
   const hk = H0 - k * D;
   if (k >= K) {
-    tray.body.scale.set(FULL_L, hk, 1);
+    tray.body.position.y = hk - H0;
     tray.slab.visible = false;
     return;
   }
-  tray.body.scale.set(FULL_L, hk - D, 1);
-  const sx = Math.min(X1, Math.max(X0, bx));
-  const len = X1 - sx;
+  tray.body.position.y = hk - D - H0;
+  const end = X1 - ROUND * 0.5;
+  const sx = Math.min(end, Math.max(X0 + ROUND * 0.5, bx));
+  const len = end - sx;
   tray.slab.visible = len > 1e-3;
   tray.slab.position.set(sx, hk - D, 0);
   tray.slab.scale.set(Math.max(len, 1e-3), D, 1);
@@ -216,14 +230,14 @@ function poseTray(tray: Tray, k: number, bx: number): void {
 
 function soapColor(tray: Tray, cycle: number, t: number): void {
   const i = ((cycle % SOAP_N.length) + SOAP_N.length) % SOAP_N.length;
-  ember(color, SOAP_N[i], SOAP_SHIFT[i] + drift(t) * 0.5);
+  ember(color, SOAP_N[i], SOAP_SHIFT[i] + drift(t) * 0.5, SOAP_GLOW);
   tray.mat.color.copy(color);
 }
 
 /** 刃先の位置 [x, y]（ストローク k、ストローク内の秒 p） */
 function bladeAt(k: number, p: number): [number, number] {
   const cut = H0 - k * D - D;
-  const xs = X0 - 0.3;
+  const xs = HOVER_X;
   if (p < T_DOWN) {
     const u = smooth(p / T_DOWN);
     return [lerp(xs, X0, u), lerp(HOVER_Y, cut, u)];
@@ -280,12 +294,12 @@ export const soapCarving: SceneModule = {
 
     // 刃: 刃先が原点、+x が刃の背へ向かう板。背に取っ手を渡す
     blade = new THREE.Group();
-    const steel = new THREE.MeshStandardMaterial({ color: 0xc9b3a4, roughness: 0.22, metalness: 0.62 });
+    const steel = new THREE.MeshStandardMaterial({ color: 0xf0ddcc, roughness: 0.14, metalness: 0.45 });
     const plateGeo = new THREE.BoxGeometry(BLADE_LEN, 0.035, BLADE_W);
     plateGeo.translate(BLADE_LEN / 2, 0, 0);
     blade.add(new THREE.Mesh(plateGeo, steel));
     const wood = new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.7, metalness: 0.05 });
-    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, BLADE_W + 1.6, 20), wood);
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, BLADE_W + 0.9, 20), wood);
     handle.rotation.x = Math.PI / 2;
     handle.position.x = BLADE_LEN;
     blade.add(handle);
@@ -313,7 +327,7 @@ export const soapCarving: SceneModule = {
     let bx = X0;
     let by = HOVER_Y;
     if (k < K) [bx, by] = bladeAt(k, p);
-    else bx = X0 - 0.3;
+    else bx = HOVER_X;
     blade.position.set(bx, by, 0);
     const sliding = k < K && p >= T_DOWN && p < T_END;
     poseTray(cur, k, p < T_DOWN ? X0 : p < T_END ? bx : X1);
@@ -338,12 +352,12 @@ export const soapCarving: SceneModule = {
       if (!done) continue;
       const sx = X1 + 0.85 * FULL_R;
       const sy = H0 - j * D + FULL_R;
-      const [rx, ry, yaw] = PILE[j];
+      const [rx, ry, rz, yaw] = PILE[j];
       const u = j < k ? 1 : Math.min(1, (p - T_END) / T_FALL);
       const ue = smooth(u);
       const x = lerp(sx, rx, ue);
       const y = lerp(sy, ry, u * u) + 0.45 * 4 * u * (1 - u);
-      m.position.set(x, y, 0);
+      m.position.set(x, y, rz * ue);
       m.rotation.y = (yaw + yawJitter[j]) * ue;
       m.rotation.z = -(x - sx) / FULL_R;
     }
