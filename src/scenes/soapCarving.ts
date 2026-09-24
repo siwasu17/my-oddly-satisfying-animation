@@ -54,10 +54,10 @@ const BOARD_H = 0.3;
 const SWAP_DIST = 14;
 
 /** 石鹸の色: ember の n と、淡くするために混ぜる暖かい白と、その割合 */
-const SOAP_N = [0.8, 0.9, 1.0];
+const SOAP_N = [0.72, 0.84, 0.95];
 const SOAP_SHIFT = [0.0, 0.02, -0.02];
-const SOAP_PALE = new THREE.Color(0xf0e4da);
-const SOAP_PALE_MIX = 0.72;
+const SOAP_PALE = new THREE.Color(0xdccfc4);
+const SOAP_PALE_MIX = 0.7;
 /** 切り込みの溝の暗さ（石鹸色に掛ける） */
 const GROOVE_DARK = 0.18;
 /** 溝の太さと、面から出す厚み */
@@ -217,13 +217,24 @@ function poseTray(tray: Tray, layer: number, p: number): void {
   const zf = L < LAYERS ? frontZ(L) : 0;
   for (let i = 0; i < LINES; i++) {
     const [ax, ay, bx] = lineEnds(i);
-    const u = L < LAYERS && !slicing ? smooth((p - T_SCORE0 - i * LINE_DUR) / LINE_DRAW) : 0;
+    const vertical = ax === bx;
+    let u = L < LAYERS ? smooth((p - T_SCORE0 - i * LINE_DUR) / LINE_DRAW) : 0;
+    let top = ay;
+    if (slicing) {
+      // 削いでいる間は、刃がまだ通っていない段の溝だけを残す
+      if (vertical) {
+        top = sliceY;
+        u = sliceY / S;
+      } else if (ay > sliceY - CELL * 0.5) {
+        u = 0;
+      }
+    }
     const len = u * S;
     if (len < 1e-3) {
       dummy.position.set(0, -10, 0);
       dummy.scale.setScalar(0.0001);
-    } else if (ax === bx) {
-      dummy.position.set(ax, ay - len / 2, zf + GROOVE_D / 2);
+    } else if (vertical) {
+      dummy.position.set(ax, top - len / 2, zf + GROOVE_D / 2);
       dummy.scale.set(GROOVE_W, len, GROOVE_D);
     } else {
       dummy.position.set(ax + len / 2, ay, zf + GROOVE_D / 2);
