@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { BG } from './palette.ts';
 
@@ -108,6 +109,7 @@ export function createStage(container: HTMLElement): Stage {
     ),
   );
   composer.addPass(new OutputPass());
+  composer.addPass(new ShaderPass(DitherShader));
 
   function resize(): void {
     const w = window.innerWidth;
@@ -200,6 +202,40 @@ function warmEnvironment(renderer: THREE.WebGLRenderer): THREE.Texture {
   for (const d of disposables) d.dispose();
   return target.texture;
 }
+
+/**
+ * 画面へ書き出す直前に、1 階調ぶんのディザを掛ける。
+ *
+ * 途中のレンダーターゲットは EffectComposer の既定で HalfFloat なので、段が付くのは
+ * 最後に 8bit の画面へ丸めるところだけ。背景がほぼ黒で霧とビネットが重なるため、
+ * 暗部のなだらかな階調がそこで縞（バンディング）になる。
+ *
+ * 丸める前に ±1/255 の三角分布のノイズを足しておくと、縞の境目が細かく散って見えなくなる。
+ * 量は 8bit の 1 段ぶんなので、ノイズそのものは目に見えない。
+ * 時間で動かすとフィルムグレインのようにちらつくので、模様は画素位置だけで決めて固定する。
+ * 模様は Interleaved Gradient Noise（ブルーノイズに近い、低周波の少ない乱数）。
+ */
+const DitherShader = {
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }`,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    varying vec2 vUv;
+    float ign(vec2 p) {
+      return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+    }
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      // 一様乱数 2 つの和で三角分布にする。明るさによって縞の消え方がむらにならない
+      float n = ign(gl_FragCoord.xy) + ign(gl_FragCoord.xy + vec2(47.0, 17.0)) - 1.0;
+      gl_FragColor = vec4(c.rgb + n / 255.0, c.a);
+    }`,
+};
 
 /** シーン切替時に、そのシーンが確保した GPU リソースを解放する。 */
 export function disposeGroup(group: THREE.Object3D): void {
