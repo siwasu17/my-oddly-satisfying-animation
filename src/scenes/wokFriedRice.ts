@@ -25,7 +25,7 @@ const BITS = 36;
 const BOWL_R = 4.6;
 const RIM_R = 4.0;
 /** 鍋の底の高さ */
-const WOK_Y = 1.3;
+const WOK_Y = 1.0;
 
 /** ひとあおりの周期（秒） */
 const PERIOD = 2.4;
@@ -46,7 +46,7 @@ const SCATTER = 1.1;
 
 /** ご飯の山の半径と高さ */
 const PILE_R = 2.4;
-const PILE_H = 0.75;
+const PILE_H = 0.9;
 
 /** 鍋の押し引きの量と、奥の縁を持ち上げる角度 */
 const PUSH = 0.9;
@@ -56,7 +56,7 @@ const TILT = 0.32;
 const TOAST_PERIOD = 44;
 
 /** コンロの火の数と輪の半径 */
-const FLAMES = 18;
+const FLAMES = 12;
 const FLAME_RING = 1.15;
 
 // ---- ここまで ------------------------------------------------------------
@@ -129,7 +129,7 @@ function launchAt(i: number, c: number): number {
 export const wokFriedRice: SceneModule = {
   name: 'Wok Fried Rice',
   desc: '中華鍋をあおるたび、ご飯が奥から宙へ舞って弧を描き、ジャッと鍋へ戻る。',
-  camera: { pos: [0, 6.2, 14], target: [0.4, 2.9, 0] },
+  camera: { pos: [0, 10.5, 12], target: [0.4, 2.2, 0] },
 
   build(root) {
     tossTick = ticker();
@@ -147,7 +147,7 @@ export const wokFriedRice: SceneModule = {
 
     // 床とコンロ
     const floor = new THREE.Mesh(
-      new THREE.CircleGeometry(14, 96),
+      new THREE.CircleGeometry(40, 96),
       new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.6, metalness: 0.5 }),
     );
     floor.rotation.x = -Math.PI / 2;
@@ -155,10 +155,10 @@ export const wokFriedRice: SceneModule = {
     root.add(floor);
 
     const stove = new THREE.Mesh(
-      new THREE.CylinderGeometry(2.3, 2.6, 0.7, 48, 1, true),
+      new THREE.CylinderGeometry(1.7, 1.9, 0.5, 48, 1, true),
       new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.55, metalness: 0.6, side: THREE.DoubleSide }),
     );
-    stove.position.y = 0.35;
+    stove.position.y = 0.25;
     root.add(stove);
 
     const burner = new THREE.Mesh(
@@ -166,7 +166,7 @@ export const wokFriedRice: SceneModule = {
       new THREE.MeshStandardMaterial({ color: 0x2a1c18, roughness: 0.6, metalness: 0.7 }),
     );
     burner.rotation.x = Math.PI / 2;
-    burner.position.y = 0.55;
+    burner.position.y = 0.45;
     root.add(burner);
 
     const flameGeo = new THREE.ConeGeometry(0.09, 1, 8);
@@ -294,9 +294,9 @@ export const wokFriedRice: SceneModule = {
     for (let i = 0; i < FLAMES; i++) {
       const a = (i / FLAMES) * Math.PI * 2;
       const f = 0.5 + 0.5 * Math.sin(t * 9 + i * 2.3) * Math.sin(t * 5.3 + i * 1.7);
-      dummy.position.set(Math.cos(a) * FLAME_RING, 0.6, Math.sin(a) * FLAME_RING);
+      dummy.position.set(Math.cos(a) * FLAME_RING, 0.5, Math.sin(a) * FLAME_RING);
       dummy.rotation.set(0, 0, 0);
-      dummy.scale.set(1, (0.3 + 0.3 * f) * (0.7 + 0.6 * hash(i, 0, 5)), 1);
+      dummy.scale.set(0.8 + 0.5 * hash(i, 0, 6), (0.45 + 0.2 * f) * (0.8 + 0.4 * hash(i, 0, 5)), 1);
       dummy.updateMatrix();
       flames.setMatrixAt(i, dummy.matrix);
       ember(color, 0.45 + 0.15 * f, hue, -0.06);
