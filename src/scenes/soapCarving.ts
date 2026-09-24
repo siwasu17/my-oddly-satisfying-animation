@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
 import { tone, ticker } from '../audio.ts';
-import { SURFACE, ember, drift } from '../palette.ts';
+import { SURFACE, ember, emberColor, drift } from '../palette.ts';
 
 /**
  * Soap Carving — 石鹸を削る（ASMR の定番「格子切り」）。
@@ -54,14 +54,14 @@ const BOARD_H = 0.3;
 const SWAP_DIST = 14;
 
 /** 石鹸の色: ember の n と、淡くするために混ぜる暖かい白と、その割合 */
-const SOAP_N = [0.55, 0.75, 0.92];
+const SOAP_N = [0.8, 0.9, 1.0];
 const SOAP_SHIFT = [0.0, 0.02, -0.02];
-const SOAP_PALE = new THREE.Color(0xdccbc0);
-const SOAP_PALE_MIX = 0.65;
+const SOAP_PALE = new THREE.Color(0xf0e4da);
+const SOAP_PALE_MIX = 0.72;
 /** 切り込みの溝の暗さ（石鹸色に掛ける） */
-const GROOVE_DARK = 0.3;
+const GROOVE_DARK = 0.18;
 /** 溝の太さと、面から出す厚み */
-const GROOVE_W = 0.06;
+const GROOVE_W = 0.1;
 const GROOVE_D = 0.02;
 
 // --- 小道具 -----------------------------------------------------------------
@@ -125,11 +125,14 @@ function makeTray(root: THREE.Group): Tray {
 
   const cubes = new THREE.InstancedMesh(new THREE.BoxGeometry(CELL, CELL, CELL), mat, CUBES);
   cubes.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  // 最初のフレームの配置で包み球が決まってしまうので、視錐台カリングを切る
+  cubes.frustumCulled = false;
   group.add(cubes);
 
   // 切り込み: 縦 7 本・横 7 本の細い溝。長さを伸ばして「引いている」ように見せる
   const grooves = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), grooveMat, LINES);
   grooves.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  grooves.frustumCulled = false;
   group.add(grooves);
 
   return { group, mat, grooveMat, body, cubes, grooves };
@@ -305,7 +308,7 @@ export const soapCarving: SceneModule = {
     nxt = makeTray(root);
 
     const steel = new THREE.MeshStandardMaterial({ color: 0xe2d6cc, roughness: 0.25, metalness: 0.25 });
-    const grip = new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.7, metalness: 0.05 });
+    const grip = new THREE.MeshStandardMaterial({ color: emberColor(0.25), roughness: 0.7, metalness: 0.05 });
 
     // カッター: 刃先が原点。刃は手前（+z）の斜め上へ伸び、その先に柄
     cutter = new THREE.Group();
@@ -323,7 +326,7 @@ export const soapCarving: SceneModule = {
 
     // 包丁: 刃先（下辺）が原点の薄い板。柄は右へ
     knife = new THREE.Group();
-    const plate = new THREE.Mesh(new THREE.BoxGeometry(S + 1.0, KNIFE_H, 0.012), steel);
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(S + 1.0, KNIFE_H, 0.025), steel);
     plate.position.set(0.2, KNIFE_H / 2, 0);
     knife.add(plate);
     const kHandle = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 1.6, 16), grip);
