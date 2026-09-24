@@ -38,7 +38,7 @@ const H0 = 2.0;
 /** 角の丸み */
 const ROUND = 0.16;
 /** 1 回に削る厚み */
-const D = 0.1;
+const D = 0.08;
 /** 削る帯の幅（丸めた角の内側の平らなところ） */
 const STRIP_W = SZ - 2 * ROUND + 0.02;
 
@@ -52,9 +52,9 @@ const BOARD_H = 0.3;
 const SWAP_DIST = 17;
 
 /** 刃が待機する高さ */
-const HOVER_Y = H0 + 0.55;
+const HOVER_Y = H0 + 0.22;
 /** 刃が待機する x（石鹸の左端より手前） */
-const HOVER_X = X0 - 1.2;
+const HOVER_X = X0 - 0.75;
 /** 刃の傾き（水平からの角度） */
 const BLADE_LEAN = (24 * Math.PI) / 180;
 const BLADE_LEN = 0.85;
@@ -75,7 +75,10 @@ const THETA_OUT = (-150 * Math.PI) / 180;
 const SOAP_N = [0.95, 0.88, 1.0];
 const SOAP_SHIFT = [0.0, 0.03, -0.025];
 /** 明度の持ち上げ。白寄りのクリームにする */
-const SOAP_GLOW = 0;
+const SOAP_GLOW = 0.04;
+/** 彩度を落とすために混ぜる暖かい灰色と、その割合（木の色に寄らないよう白っぽくする） */
+const SOAP_GREY = new THREE.Color(0xb3a79d);
+const SOAP_GREY_MIX = 0.45;
 
 // --- 形の計算 ---------------------------------------------------------------
 
@@ -231,7 +234,7 @@ function poseTray(tray: Tray, k: number, bx: number): void {
 function soapColor(tray: Tray, cycle: number, t: number): void {
   const i = ((cycle % SOAP_N.length) + SOAP_N.length) % SOAP_N.length;
   ember(color, SOAP_N[i], SOAP_SHIFT[i] + drift(t) * 0.5, SOAP_GLOW);
-  tray.mat.color.copy(color);
+  tray.mat.color.copy(color).lerp(SOAP_GREY, SOAP_GREY_MIX);
 }
 
 /** 刃先の位置 [x, y]（ストローク k、ストローク内の秒 p） */
