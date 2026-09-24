@@ -49,6 +49,8 @@ Three.js のループアニメーションを、複数の Claude Code セッシ�
 ### 4. コミットは自分のブランチにだけ
 
 自分のブランチは `scene/<name>`。`main` に直接コミットしない。push はユーザーが行う。
+**例外**: `/new-scene-cloud`（クラウドのセッションで PR まで出すスキル）だけは、
+`claude/` で始まるブランチへ自分で push して PR を作る。`main` への push と force push はしない。
 
 `main` への取り込みは `npm run merge-scene <name>` で行う。**手で `git merge` しない。**
 未コミットの変更や lockfile の衝突、他セッションが使用中の worktree を、このスクリプトが見てくれる。
