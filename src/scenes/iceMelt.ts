@@ -21,9 +21,12 @@ const PERIOD = 36;
 const R = 6.2;
 /** 氷を並べる範囲の半径 */
 const ICE_R = 5.7;
-/** 氷の板の間隔（六方に詰める）と、板 1 枚の半径 */
-const PITCH = 1.12;
-const PLATE = 0.64;
+/** 大きな板の間隔（六方に詰める）と半径。板のすき間には小さな欠片を置く */
+const PITCH = 1.75;
+const PLATE = 1.02;
+const CHIP = 0.42;
+/** 欠片を置く割合 */
+const CHIP_RATE = 0.7;
 /** 板の角の数（少なめにして不揃いな多角形に見せる） */
 const SIDES = 7;
 /** 氷の厚みと、水面から出ている高さ */
@@ -53,35 +56,43 @@ const SEG = 88;
 
 const dummy = new THREE.Object3D();
 const color = new THREE.Color();
-const ICE_TINT = new THREE.Color(0xfff3e8);
+const ICE_TINT = new THREE.Color(0xfff8f2);
 
 // --- 氷の配置（固定シード。モジュールを読んだときに 1 度だけ決める） ---
-/** 氷ごとの [x, z, 溶け始め, 張り始め, 位相, 向き, 横の伸び, 縦の伸び] */
+/** 氷ごとの [x, z, 溶け始め, 張り始め, 位相, 向き, 横の半径, 縦の半径] */
 const STRIDE = 8;
 const layout: number[] = [];
 {
   let s = 0.417;
   const rnd = (): number => (s = (s * 9301 + 0.49297) % 1);
+  const put = (x: number, z: number, r: number): void => {
+    const d = Math.hypot(x, z);
+    if (d > ICE_R - r * 0.5) return;
+    // 岸に近いほど先に溶け、先に張る。小さい欠片は少し早く溶ける
+    const outer = d / ICE_R + (r < PLATE * 0.6 ? 0.08 : 0);
+    const j = (rnd() - 0.5) * 0.16;
+    const stretch = 0.8 + rnd() * 0.4;
+    layout.push(
+      x,
+      z,
+      MELT_FROM + (MELT_TO - MELT_FROM) * Math.min(1, Math.max(0, 1 - outer + j)),
+      FREEZE_FROM + (FREEZE_TO - FREEZE_FROM) * Math.min(1, Math.max(0, 1 - outer + j * 0.5)),
+      rnd() * Math.PI * 2,
+      rnd() * Math.PI * 2,
+      r * stretch,
+      r * (1.8 - stretch),
+    );
+  };
   const rows = Math.ceil(ICE_R / (PITCH * 0.866)) + 1;
+  const h = PITCH * 0.866;
   for (let r = -rows; r <= rows; r++) {
     for (let c = -rows; c <= rows; c++) {
-      const x = (c + (r & 1) * 0.5) * PITCH + (rnd() - 0.5) * 0.22;
-      const z = r * PITCH * 0.866 + (rnd() - 0.5) * 0.22;
-      const d = Math.hypot(x, z);
-      if (d > ICE_R - PLATE * 0.55) continue;
-      // 岸に近いほど先に溶け、先に張る
-      const outer = d / ICE_R;
-      const j = (rnd() - 0.5) * 0.16;
-      layout.push(
-        x,
-        z,
-        MELT_FROM + (MELT_TO - MELT_FROM) * Math.min(1, Math.max(0, 1 - outer + j)),
-        FREEZE_FROM + (FREEZE_TO - FREEZE_FROM) * Math.min(1, Math.max(0, 1 - outer + j * 0.5)),
-        rnd() * Math.PI * 2,
-        rnd() * Math.PI * 2,
-        0.88 + rnd() * 0.28,
-        0.88 + rnd() * 0.28,
-      );
+      const x = (c + (r & 1) * 0.5) * PITCH;
+      const z = r * h;
+      put(x + (rnd() - 0.5) * 0.3, z + (rnd() - 0.5) * 0.3, PLATE * (0.8 + rnd() * 0.4));
+      // 3 枚の板に挟まれた三角のすき間（上向きと下向き）に欠片を置く
+      if (rnd() < CHIP_RATE) put(x + PITCH / 2, z + h / 3, CHIP * (0.7 + rnd() * 0.6));
+      if (rnd() < CHIP_RATE) put(x + PITCH / 2, z - h / 3, CHIP * (0.7 + rnd() * 0.6));
     }
   }
 }
@@ -106,7 +117,7 @@ const goneAt = (i: number): number => tiles[i * STRIDE + 2] + MELT_DUR;
 export const iceMelt: SceneModule = {
   name: 'Ice Melt',
   desc: '池を覆う薄氷が岸から一枚ずつ溶けて波紋になり、水面に戻る。やがてまた薄氷が張る。',
-  camera: { pos: [0, 11.5, 12.5], target: [0, -0.4, 0.3] },
+  camera: { pos: [0, 9.6, 10.2], target: [0, -0.4, 0.4] },
 
   build(root) {
     ticks = tickers(COUNT);
@@ -119,37 +130,37 @@ export const iceMelt: SceneModule = {
     water = new THREE.Mesh(
       wg,
       new THREE.MeshStandardMaterial({
-        color: ember(new THREE.Color(), 0.12, 0.02, -0.02),
-        roughness: 0.34,
+        color: ember(new THREE.Color(), 0.42, 0, -0.2),
+        roughness: 0.3,
         metalness: 0.5,
       }),
     );
     root.add(water);
 
     // 氷: 角の少ない薄い円柱を、向きと縦横の伸びでばらして不揃いな板にする
-    const ig = new THREE.CylinderGeometry(PLATE, PLATE * 0.94, THICK, SIDES, 1);
+    const ig = new THREE.CylinderGeometry(1, 0.94, THICK, SIDES, 1);
     const im = new THREE.MeshPhysicalMaterial({
-      roughness: 0.12,
+      roughness: 0.2,
       metalness: 0,
       clearcoat: 1,
-      clearcoatRoughness: 0.08,
+      clearcoatRoughness: 0.06,
+      emissive: 0x2a211b,
       transparent: true,
-      opacity: 0.5,
-      depthWrite: false,
+      opacity: 0.86,
     });
     ice = new THREE.InstancedMesh(ig, im, COUNT);
     ice.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     root.add(ice);
 
     // 岸: 正方形の水面の角を覆う低い石の輪
-    const stone = new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.75, metalness: 0.15 });
+    const stone = new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.95, metalness: 0 });
     const bank = new THREE.Mesh(new THREE.RingGeometry(R, R * 2.2, 128, 1), stone);
     bank.rotation.x = -Math.PI / 2;
     bank.position.y = 0.16;
     root.add(bank);
     const lip = new THREE.Mesh(
       new THREE.TorusGeometry(R + 0.05, 0.24, 12, 128),
-      new THREE.MeshStandardMaterial({ color: ember(new THREE.Color(), 0.16, 0, -0.05), roughness: 0.7 }),
+      new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.95, metalness: 0 }),
     );
     lip.rotation.x = -Math.PI / 2;
     lip.position.y = 0.1;
@@ -201,8 +212,9 @@ export const iceMelt: SceneModule = {
       dummy.updateMatrix();
       ice.setMatrixAt(i, dummy.matrix);
 
-      ember(color, 0.9, hue * 0.5, -0.04);
-      color.lerp(ICE_TINT, 0.45 + 0.3 * frost);
+      // ほぼ白。板ごとに少しだけ濃淡を変えて、厚みの違う氷に見せる
+      ember(color, 0.95, hue * 0.4, -0.02);
+      color.lerp(ICE_TINT, 0.62 + 0.25 * frost - 0.12 * Math.sin(ph * 3.1) ** 2);
       ice.setColorAt(i, color);
     }
     ice.instanceMatrix.needsUpdate = true;
