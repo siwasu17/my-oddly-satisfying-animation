@@ -17,6 +17,12 @@ export interface SceneModule {
    * 反射させたくないシーンは 0 にする。material.envMap を自前で持つ材質には効かない。
    */
   readonly environment?: number;
+  /**
+   * key light の影を落とすか。既定は false（影は毎フレーム描き直すので軽くない）。
+   * 床の上に物が置かれていて、浮いて見えるシーンだけ true にする。
+   * 影を受ける / 落とすは材質から自動で決まる。外したいメッシュは userData.shadow = false にする。
+   */
+  readonly shadows?: boolean;
   /** シーン開始時に1度だけ呼ばれる。追加するものはすべて root の子にする。 */
   build(root: THREE.Group): void;
   /**

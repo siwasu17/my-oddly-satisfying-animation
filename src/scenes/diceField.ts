@@ -492,6 +492,7 @@ export const diceField: SceneModule = {
   name: 'Dice Field',
   desc: '間を空けて積んだ 5 枚の盤。黒曜石の立方体が盤を歩き、立ち止まったところで一段下へ降りる。',
   camera: { pos: [10, 23.5, 26], target: [0, STACK_H * 0.55, 0] },
+  shadows: true,
 
   build(root) {
     buildDice();
