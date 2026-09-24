@@ -43,7 +43,9 @@ const KNIFE_H = 0.7;
 
 /** 落ちるサイコロ */
 const GRAVITY = 14;
-const GAP = 0.94; // 削いだあとのサイコロの大きさ（隙間が格子に見える）
+const GAP = 0.94;
+/** 同じ段の中で列ごとに離れる時刻をずらす幅（秒）。一度にどさっと落とさない */
+const RELEASE_STAGGER = 0.06; // 削いだあとのサイコロの大きさ（隙間が格子に見える）
 
 /** 板（上面が y = 0） */
 const BOARD_X0 = -2.6;
@@ -54,10 +56,10 @@ const BOARD_H = 0.3;
 const SWAP_DIST = 14;
 
 /** 石鹸の色: ember の n と、淡くするために混ぜる暖かい白と、その割合 */
-const SOAP_N = [0.72, 0.84, 0.95];
+const SOAP_N = [0.76, 0.87, 0.97];
 const SOAP_SHIFT = [0.0, 0.02, -0.02];
-const SOAP_PALE = new THREE.Color(0xdccfc4);
-const SOAP_PALE_MIX = 0.7;
+const SOAP_PALE = new THREE.Color(0xe6d9ce);
+const SOAP_PALE_MIX = 0.71;
 /** 切り込みの溝の暗さ（石鹸色に掛ける） */
 const GROOVE_DARK = 0.18;
 /** 溝の太さと、面から出す厚み */
@@ -268,8 +270,9 @@ function cutterAt(L: number, p: number): [number, number, number] {
     const u = smooth((q - LINE_DRAW) / (LINE_DUR - LINE_DRAW));
     return [lerp(bx, nx, u), lerp(by, ny, u), zf + Math.sin(Math.PI * u) * 0.3];
   }
-  const u = smooth((p - T_SCORE1) / 0.6);
-  return [S / 2, lerp(S - (GRID - 1) * CELL + 1.5, TOOL_UP, u), zf + 0.3];
+  // 刻み終えたら、右上の画面外へすばやく退く
+  const u = smooth((p - T_SCORE1) / 0.3);
+  return [S / 2 + u * 4, lerp(S - (GRID - 1) * CELL + 1.5, TOOL_UP, u), zf + 0.3];
 }
 
 /** 包丁の刃先の高さ（層の中の秒 p） */
@@ -305,7 +308,7 @@ export const soapCarving: SceneModule = {
     for (let i = 0; i < CUBES; i++) {
       const f = i * 7;
       const j = Math.floor(i / CELLS);
-      FALL[f] = rnd() * 0.12;
+      FALL[f] = (i % GRID) * RELEASE_STAGGER + rnd() * 0.1;
       FALL[f + 1] = (rnd() - 0.5) * 0.9;
       FALL[f + 2] = 0.5 + rnd() * 1.4;
       FALL[f + 3] = CELL / 2 + rnd() * 0.12 * (j + 1);
