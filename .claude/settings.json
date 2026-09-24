@@ -18,6 +18,7 @@
       "Bash(agent-browser:*)",
       "Bash(node scripts/shot.mjs:*)",
       "Bash(npm run shot:*)",
+      "Bash(node scripts/shot-pw.mjs:*)",
       "Bash(node scripts/merge-scene.mjs:*)",
       "Bash(bash scripts/dev-smoke.sh:*)",
       "Bash(bash scripts/wt.sh list)",
@@ -36,10 +37,17 @@
       "Bash(tail:*)",
       "Bash(rg:*)",
       "Bash(grep:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(git push -u origin claude/:*)",
+      "Bash(git push -u origin HEAD:claude/:*)",
+      "Bash(git restore package-lock.json)"
     ],
     "deny": [
-      "Bash(git push:*)",
+      "Bash(git push origin main:*)",
+      "Bash(git push -u origin main:*)",
+      "Bash(git push origin HEAD:main:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
       "Bash(rm -rf:*)"
     ]
   },
