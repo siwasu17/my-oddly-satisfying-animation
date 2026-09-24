@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { SceneModule } from '../types.ts';
 import { tone, tickers } from '../audio.ts';
 import { SURFACE, ember, drift } from '../palette.ts';
@@ -6,103 +7,61 @@ import { SURFACE, ember, drift } from '../palette.ts';
 /**
  * Ice Melt。
  *
- * 丸い池を薄い氷が覆っている。氷は不揃いな蓮の葉のような板の寄せ集めで、岸に近いものから
- * 順にすき間を空けて離れ、ゆっくり縮んで水に溶ける。溶けきった場所からは柔らかい波紋が
- * ひとつ広がり、最後の一枚が真ん中で消えると、あとにはうねる水面だけが残る。
- * しばらくして岸から透けた薄氷が這うように張り直し、白く締まって最初の氷面に戻る。
- * 36 秒で一巡する。音は氷が溶けきるたびに、数枚おきに小さな雫の音を鳴らす。
+ * 丸い池に、角ばった氷山が大小 7 つ浮かんでいる。小さく岸に近いものから順に、
+ * ゆっくり沈みながら縮んで溶けていく。溶けている間は水際から小さな波紋が滴るように
+ * 広がり、溶けきった瞬間に大きな波紋がひとつ広がる。真ん中の大きな氷山が最後に消えると、
+ * あとにはうねる水面だけが残る。しばらくして氷山は水の下から静かに浮かび上がり、元の姿に戻る。
+ * 36 秒で一巡する。音は氷山が溶けきるたびに雫の音、溶けている間はごく小さな滴りの音。
  *
- * スコープ外: 氷の中の気泡やひび割れの模様、水面の映り込み（反射用の描画パス）。
+ * スコープ外: 氷山が割れて欠片が落ちる動き、水中に透けて見える氷山の根元。
  */
 
 /** 一巡の秒数 */
 const PERIOD = 36;
 /** 池の半径（水面のメッシュは一辺 2R の正方形で、角は岸の石で隠す） */
 const R = 6.2;
-/** 氷を並べる範囲の半径 */
-const ICE_R = 5.7;
-/** 大きな板の間隔（六方に詰める）と半径。板のすき間には小さな欠片を置く */
-const PITCH = 1.75;
-const PLATE = 1.02;
-const CHIP = 0.42;
-/** 欠片を置く割合 */
-const CHIP_RATE = 0.22;
-/** 板の角の数（少なめにして不揃いな多角形に見せる） */
-const SIDES = 7;
-/** 氷の厚みと、水面から出ている高さ */
-const THICK = 0.14;
-const ABOVE = 0.07;
-/** 溶け始めの時刻（岸側）と、最後の 1 枚が溶け始める時刻（中心） */
-const MELT_FROM = 3.5;
-const MELT_TO = 13;
-/** 1 枚が溶けきるまでの秒数 */
-const MELT_DUR = 4.2;
-/** 張り直しの始まり（岸側）と、最後の 1 枚が張り始める時刻 */
-const FREEZE_FROM = 26.5;
-const FREEZE_TO = 30.5;
-/** 1 枚が透けた膜から白く締まるまでの秒数 */
-const FREEZE_DUR = 3.5;
-/** 割れて離れるときに外へずれる量 */
-const GAP = 0.14;
+/** 氷山ごとの [x, z, 大きさ, 溶け始め, 溶ける秒数]。大きく中心に近いものほど遅い */
+const BERGS: [number, number, number, number, number][] = [
+  [0.3, -0.2, 1.55, 9.0, 8.0],
+  [-2.9, -1.4, 0.95, 5.5, 6.0],
+  [2.8, 1.6, 1.05, 6.5, 6.5],
+  [-1.6, 2.6, 0.8, 4.2, 5.0],
+  [3.1, -2.3, 0.7, 3.4, 4.5],
+  [-3.9, 1.0, 0.55, 2.8, 4.0],
+  [1.2, 3.6, 0.6, 3.8, 4.2],
+];
+const COUNT = BERGS.length;
+/** 水面から出ている高さ（大きさに対する比） */
+const TALL = 1.25;
+/** 浮かび上がりの始まりと、1 つずつのずれ、1 つが浮かび上がるまでの秒数 */
+const RISE_FROM = 26.5;
+const RISE_STAGGER = 0.6;
+const RISE_DUR = 4.5;
+/** 溶けている間に水際から滴る波紋の間隔（秒） */
+const DRIP = 1.4;
 
-/** 波紋: 振幅 / 広がる速さ / 波束の幅 / 波数 / 寿命 */
-const RIP_AMP = 0.14;
+/** 波紋: 振幅 / 滴りの振幅 / 広がる速さ / 波束の幅 / 波数 / 寿命 */
+const RIP_AMP = 0.16;
+const DRIP_AMP = 0.05;
 const RIP_SPEED = 1.9;
-const RIP_WIDTH = 1.3;
-const RIP_K = 2.0;
-const RIP_LIFE = 6;
+const RIP_WIDTH = 1.2;
+const RIP_K = 2.2;
+const RIP_LIFE = 6.5;
 /** 水面を割る細かさ */
 const SEG = 88;
 
-const dummy = new THREE.Object3D();
 const color = new THREE.Color();
-const ICE_TINT = new THREE.Color(0xfff8f2);
+const ICE_TINT = new THREE.Color(0xf4eee9);
+/** 氷の明るさ（ブルームのしきい値を大きく超えないよう、白から少し落とす） */
+const ICE_VALUE = 0.78;
 
-// --- 氷の配置（固定シード。モジュールを読んだときに 1 度だけ決める） ---
-/** 氷ごとの [x, z, 溶け始め, 張り始め, 位相, 向き, 横の半径, 縦の半径] */
-const STRIDE = 8;
-const layout: number[] = [];
-{
-  let s = 0.417;
-  const rnd = (): number => (s = (s * 9301 + 0.49297) % 1);
-  const put = (x: number, z: number, r: number): void => {
-    const d = Math.hypot(x, z);
-    if (d > ICE_R - r * 0.5) return;
-    // 岸に近いほど先に溶け、先に張る。小さい欠片は少し早く溶ける
-    const outer = d / ICE_R + (r < PLATE * 0.6 ? 0.08 : 0);
-    const j = (rnd() - 0.5) * 0.16;
-    const stretch = 0.8 + rnd() * 0.4;
-    layout.push(
-      x,
-      z,
-      MELT_FROM + (MELT_TO - MELT_FROM) * Math.min(1, Math.max(0, 1 - outer + j)),
-      FREEZE_FROM + (FREEZE_TO - FREEZE_FROM) * Math.min(1, Math.max(0, 1 - outer + j * 0.5)),
-      rnd() * Math.PI * 2,
-      rnd() * Math.PI * 2,
-      r * stretch,
-      r * (1.8 - stretch),
-    );
-  };
-  const rows = Math.ceil(ICE_R / (PITCH * 0.866)) + 1;
-  const h = PITCH * 0.866;
-  for (let r = -rows; r <= rows; r++) {
-    for (let c = -rows; c <= rows; c++) {
-      const x = (c + (r & 1) * 0.5) * PITCH;
-      const z = r * h;
-      put(x + (rnd() - 0.5) * 0.3, z + (rnd() - 0.5) * 0.3, PLATE * (0.8 + rnd() * 0.4));
-      // 3 枚の板に挟まれた三角のすき間（上向きと下向き）に欠片を置く
-      if (rnd() < CHIP_RATE) put(x + PITCH / 2, z + h / 3, CHIP * (0.85 + rnd() * 0.3));
-      if (rnd() < CHIP_RATE) put(x + PITCH / 2, z - h / 3, CHIP * (0.85 + rnd() * 0.3));
-    }
-  }
-}
-const tiles = Float32Array.from(layout);
-const COUNT = tiles.length / STRIDE;
-
-let ice: THREE.InstancedMesh;
+let bergs: THREE.Mesh[] = [];
+let foams: THREE.Mesh[] = [];
+let sky: THREE.DataTexture | null = null;
 let water: THREE.Mesh;
 let base: Float32Array;
-let ticks = tickers(COUNT);
+let gone = tickers(COUNT);
+let drips = tickers(COUNT);
 
 const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
 const smooth = (x: number): number => {
@@ -111,16 +70,87 @@ const smooth = (x: number): number => {
 };
 /** 一巡の中の時刻 */
 const phaseOf = (t: number): number => ((t % PERIOD) + PERIOD) % PERIOD;
-/** 氷 i が溶けきる時刻 */
-const goneAt = (i: number): number => tiles[i * STRIDE + 2] + MELT_DUR;
+const goneAt = (i: number): number => BERGS[i][3] + BERGS[i][4];
+const riseAt = (i: number): number => RISE_FROM + (COUNT - 1 - i) * RISE_STAGGER;
+
+/**
+ * 水と氷に映り込ませる、ぼんやりした暖色の空。stage に環境マップが無いので自前で作る。
+ * 仰角 15〜40 度あたりをいちばん明るくして、水面の傾きが明暗の縞として読めるようにする。
+ */
+function skyTexture(): THREE.DataTexture {
+  const W = 64;
+  const H = 32;
+  const data = new Uint8Array(W * H * 4);
+  const c = new THREE.Color();
+  for (let y = 0; y < H; y++) {
+    const el = (y / (H - 1) - 0.5) * Math.PI; // -90..90 度
+    const deg = (el * 180) / Math.PI;
+    const band = Math.exp(-(((deg - 26) / 16) ** 2));
+    const lift = deg < 0 ? 0 : 0.25;
+    for (let x = 0; x < W; x++) {
+      const az = (x / W) * Math.PI * 2;
+      // 奥の方角だけ少し明るい。映り込みに向きのむらが出て、平板にならない
+      const glow = 0.7 + 0.3 * Math.cos(az - Math.PI * 1.5);
+      ember(c, 0.35 + 0.5 * band, 0, 0);
+      c.multiplyScalar((lift + band) * glow);
+      const o = (y * W + x) * 4;
+      data[o] = Math.min(255, c.r * 255);
+      data[o + 1] = Math.min(255, c.g * 255);
+      data[o + 2] = Math.min(255, c.b * 255);
+      data[o + 3] = 255;
+    }
+  }
+  const tex = new THREE.DataTexture(data, W, H);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.magFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/** 角ばった氷山の形を 1 つ作る。頂点を固定シードで押し引きし、上へ尖らせる */
+function bergGeometry(seed: number): THREE.BufferGeometry {
+  let s = seed;
+  const rnd = (): number => (s = (s * 9301 + 0.49297) % 1);
+  let g: THREE.BufferGeometry = new THREE.IcosahedronGeometry(1, 1);
+  g.deleteAttribute('normal');
+  g.deleteAttribute('uv');
+  g = mergeVertices(g); // 共有頂点をまとめてから動かす（面が裂けないように）
+  const pos = g.attributes.position as THREE.BufferAttribute;
+  const peakA = rnd() * Math.PI * 2;
+  const top = TALL + 0.5;
+  for (let v = 0; v < pos.count; v++) {
+    const k = 0.78 + rnd() * 0.4;
+    let x = pos.getX(v) * k;
+    let y = pos.getY(v) * k;
+    let z = pos.getZ(v) * k;
+    if (y > 0) {
+      // 上半分は細く高く。片側に峰を寄せて、左右非対称の稜線にする
+      const lean = 0.5 + 0.5 * Math.cos(Math.atan2(z, x) - peakA);
+      y = y * (TALL + 0.5 * lean) + rnd() * 0.12;
+      x *= 1 - (0.35 * y) / top;
+      z *= 1 - (0.35 * y) / top;
+    } else {
+      y *= 0.6;
+    }
+    pos.setXYZ(v, x, y, z);
+  }
+  g = g.toNonIndexed(); // 面ごとに法線を分けて、切り立った面を見せる
+  g.computeVertexNormals();
+  return g;
+}
 
 export const iceMelt: SceneModule = {
   name: 'Ice Melt',
-  desc: '池を覆う薄氷が岸から一枚ずつ溶けて波紋になり、水面に戻る。やがてまた薄氷が張る。',
-  camera: { pos: [0, 9.6, 10.2], target: [0, -0.4, 0.4] },
+  desc: '池に浮かぶ氷山が小さいものから沈みながら溶け、波紋を残して水面に戻る。やがてまた浮かび上がる。',
+  camera: { pos: [0, 5.6, 9.2], target: [0, 0.5, 0.3] },
 
   build(root) {
-    ticks = tickers(COUNT);
+    gone = tickers(COUNT);
+    drips = tickers(COUNT);
+
+    // 切替時の disposeGroup() はテクスチャを捨てないので、1 枚を作り置きして使い回す
+    sky ??= skyTexture();
 
     // 水面
     const wg = new THREE.PlaneGeometry(R * 2, R * 2, SEG, SEG);
@@ -130,105 +160,114 @@ export const iceMelt: SceneModule = {
     water = new THREE.Mesh(
       wg,
       new THREE.MeshStandardMaterial({
-        color: ember(new THREE.Color(), 0.3, 0, -0.26),
-        roughness: 0.14,
-        metalness: 0.8,
+        color: ember(new THREE.Color(), 0.22, 0, -0.1),
+        roughness: 0.16,
+        metalness: 0.75,
+        envMap: sky,
+        envMapIntensity: 0.9,
       }),
     );
     root.add(water);
 
-    // 氷: 角の少ない薄い円柱を、向きと縦横の伸びでばらして不揃いな板にする
-    const ig = new THREE.CylinderGeometry(1, 0.94, THICK, SIDES, 1);
-    const im = new THREE.MeshPhysicalMaterial({
-      roughness: 0.2,
-      metalness: 0,
-      clearcoat: 1,
-      clearcoatRoughness: 0.06,
-      emissive: 0x0c0907,
-      transparent: true,
-      opacity: 0.74,
-    });
-    ice = new THREE.InstancedMesh(ig, im, COUNT);
-    ice.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    root.add(ice);
+    // 氷山
+    bergs = [];
+    foams = [];
+    for (let i = 0; i < COUNT; i++) {
+      const m = new THREE.Mesh(
+        bergGeometry(0.173 + i * 0.097),
+        new THREE.MeshPhysicalMaterial({
+          roughness: 0.14,
+          metalness: 0,
+          clearcoat: 1,
+          clearcoatRoughness: 0.05,
+          envMap: sky,
+          envMapIntensity: 0.7,
+          flatShading: true,
+          transparent: true,
+          opacity: 0.88,
+        }),
+      );
+      root.add(m);
+      bergs.push(m);
+      // 喫水線のまわりの淡い泡。浮いていることを見せる
+      const foam = new THREE.Mesh(
+        new THREE.RingGeometry(0.72, 1.05, 40, 1),
+        new THREE.MeshBasicMaterial({
+          color: ember(new THREE.Color(), 0.8, 0, -0.3),
+          transparent: true,
+          opacity: 0.35,
+          depthWrite: false,
+        }),
+      );
+      foam.rotation.x = -Math.PI / 2;
+      root.add(foam);
+      foams.push(foam);
+    }
 
     // 岸: 正方形の水面の角を覆う低い石の輪
-    const stone = new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.95, metalness: 0 });
-    const bank = new THREE.Mesh(new THREE.RingGeometry(R, R * 2.2, 128, 1), stone);
-    bank.rotation.x = -Math.PI / 2;
-    bank.position.y = 0.16;
-    root.add(bank);
-    const lip = new THREE.Mesh(
-      new THREE.TorusGeometry(R + 0.05, 0.24, 12, 128),
+    const bank = new THREE.Mesh(
+      new THREE.RingGeometry(R, R * 2.2, 128, 1),
       new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.95, metalness: 0 }),
     );
-    lip.rotation.x = -Math.PI / 2;
-    lip.position.y = 0.1;
-    root.add(lip);
+    bank.rotation.x = -Math.PI / 2;
+    bank.position.y = 0.08;
+    root.add(bank);
   },
 
   update(t) {
     const p = phaseOf(t);
     const hue = drift(t);
 
-    // --- 氷 ---
+    // --- 氷山 ---
+    ember(color, 0.95, hue * 0.4, -0.1);
+    color.lerp(ICE_TINT, 0.78).multiplyScalar(ICE_VALUE);
     for (let i = 0; i < COUNT; i++) {
-      const o = i * STRIDE;
-      const x = tiles[o];
-      const z = tiles[o + 1];
-      const m = (p - tiles[o + 2]) / MELT_DUR; // 溶け具合
-      const f = (p - tiles[o + 3]) / FREEZE_DUR; // 張り直し具合
-      const ph = tiles[o + 4];
-
-      let size = 1;
-      let sy = 1;
-      let gap = 0;
-      let bob = 0;
-      let frost = 1; // 1 = 白く締まった氷、0 = 張ったばかりの透けた膜
-      if (p >= tiles[o + 3]) {
-        const e = smooth(f);
-        sy = 0.15 + 0.85 * e;
-        size = 0.55 + 0.45 * smooth(f * 1.6);
-        frost = e;
+      const [x, z, size, start, dur] = BERGS[i];
+      const m = (p - start) / dur;
+      let k = 1; // 大きさ
+      let sink = 0; // 沈んだ量（水面上の高さに対する比）
+      if (p >= riseAt(i)) {
+        // 水の下から浮かび上がる
+        const e = smooth((p - riseAt(i)) / RISE_DUR);
+        k = 0.6 + 0.4 * e;
+        sink = 1.4 * (1 - e);
       } else if (m > 0) {
-        if (m >= 1) {
-          size = 0;
-          sy = 0;
-        } else {
-          const e = m * m * (3 - 2 * m);
-          size = 1 - e;
-          sy = 1 - e * 0.6;
-          gap = GAP * smooth(m * 4);
-          bob = Math.sin(p * 1.5 + ph) * 0.03 * smooth(m * 4) * (1 - m);
-        }
+        const e = smooth(m);
+        k = m >= 1 ? 0 : 1 - 0.8 * e;
+        sink = 1.1 * e;
       }
-
-      const len = Math.hypot(x, z) || 1;
-      // 板どうしが重なるところのちらつきを避けて、高さをわずかにずらす
-      const lift = (i % 5) * 0.004;
-      dummy.position.set(x + (x / len) * gap, ABOVE * sy - (THICK * sy) / 2 + bob + lift, z + (z / len) * gap);
-      dummy.rotation.set(bob * Math.cos(ph), tiles[o + 5], bob * Math.sin(ph));
-      dummy.scale.set(size * tiles[o + 6], sy, size * tiles[o + 7]);
-      dummy.updateMatrix();
-      ice.setMatrixAt(i, dummy.matrix);
-
-      // ほぼ白。板ごとに少しだけ濃淡を変えて、厚みの違う氷に見せる
-      ember(color, 0.88, hue * 0.4, -0.12);
-      color.lerp(ICE_TINT, 0.3 + 0.15 * frost - 0.1 * Math.sin(ph * 3.1) ** 2);
-      ice.setColorAt(i, color);
+      const b = bergs[i];
+      b.visible = k > 0.001;
+      const bob = Math.sin(t * 0.6 + i * 1.9) * 0.04 * size;
+      b.scale.setScalar(size * k);
+      b.position.set(x, (bob - sink * size * TALL) * k, z);
+      b.rotation.set(Math.sin(t * 0.45 + i) * 0.03, i * 1.37 + t * 0.02, Math.cos(t * 0.4 + i * 2) * 0.03);
+      (b.material as THREE.MeshPhysicalMaterial).color.copy(color);
+      // 泡は水面の高さに置き、氷山の喫水線の太さに合わせる
+      const f = foams[i];
+      const w = size * k * 0.95 * (1 - 0.2 * clamp01(sink));
+      f.visible = b.visible;
+      f.scale.setScalar(Math.max(w, 0.001));
+      f.position.set(x, 0.035, z);
     }
-    ice.instanceMatrix.needsUpdate = true;
-    if (ice.instanceColor) ice.instanceColor.needsUpdate = true;
 
     // --- 水面 ---
-    // 開いている水面の割合。氷の下は見えないので、うねりはこれに比例させる
-    const open = smooth((p - MELT_FROM) / (MELT_TO + MELT_DUR - MELT_FROM)) * (1 - smooth((p - FREEZE_FROM) / 4));
+    // 開いている水面の割合。氷山が減るほど、池全体のうねりを大きくする
+    const open = smooth((p - 3) / 15) * (1 - smooth((p - RISE_FROM) / 5));
 
-    // いま広がっている波紋だけを拾う
+    // いま広がっている波紋を拾う: [x, z, 振幅, 年齢, 出発点の半径]
     const act: number[] = [];
     for (let i = 0; i < COUNT; i++) {
-      const age = p - goneAt(i);
-      if (age > 0 && age < RIP_LIFE) act.push(i, age);
+      const [x, z, size, start, dur] = BERGS[i];
+      const age = p - (start + dur);
+      if (age > 0 && age < RIP_LIFE) act.push(x, z, RIP_AMP, age, 0);
+      // 溶けている間に水際から滴る小さな波紋
+      for (let n = 0; n * DRIP < dur; n++) {
+        const a = p - (start + n * DRIP);
+        if (a <= 0 || a >= RIP_LIFE * 0.6) continue;
+        const k = 1 - 0.8 * smooth((n * DRIP) / dur);
+        act.push(x, z, DRIP_AMP, a, size * k * 0.9);
+      }
     }
 
     const pos = water.geometry.attributes.position as THREE.BufferAttribute;
@@ -236,15 +275,15 @@ export const iceMelt: SceneModule = {
     for (let v = 0; v < arr.length; v += 3) {
       const x = base[v];
       const z = base[v + 2];
-      let h = 0.07 * open * (Math.sin(x * 0.55 + t * 0.7) + Math.sin(z * 0.7 - t * 0.55 + x * 0.3));
-      for (let a = 0; a < act.length; a += 2) {
-        const o = act[a] * STRIDE;
-        const age = act[a + 1];
-        const d = Math.hypot(x - tiles[o], z - tiles[o + 1]);
+      let h = 0.02 + 0.06 * open * (Math.sin(x * 0.55 + t * 0.7) + Math.sin(z * 0.7 - t * 0.55 + x * 0.3));
+      for (let a = 0; a < act.length; a += 5) {
+        const age = act[a + 3];
+        const d = Math.hypot(x - act[a], z - act[a + 1]) - act[a + 4];
+        if (d < 0) continue;
         const u = (d - RIP_SPEED * age) / RIP_WIDTH;
         if (u < -3 || u > 3) continue;
         const fade = (1 - age / RIP_LIFE) * smooth(age * 2);
-        h += (RIP_AMP * fade * Math.exp(-u * u) * Math.cos(RIP_K * (d - RIP_SPEED * age))) / (1 + d * 0.2);
+        h += (act[a + 2] * fade * Math.exp(-u * u) * Math.cos(RIP_K * (d - RIP_SPEED * age))) / (1 + d * 0.2);
       }
       arr[v + 1] = h;
     }
@@ -253,12 +292,17 @@ export const iceMelt: SceneModule = {
   },
 
   sound(t, _dt, sfx) {
-    // 氷が溶けきった瞬間に、数枚おきに雫の音を鳴らす
+    const p = phaseOf(t);
     for (let i = 0; i < COUNT; i++) {
-      for (let k = ticks[i]((t - goneAt(i)) / PERIOD); k > 0; k--) {
-        if (i % 3 !== 0) continue;
-        const x = tiles[i * STRIDE] / R;
-        sfx.drop(tone(8 + ((i * 7) % 6)), { gain: 0.22, decay: 0.7, pan: x * 0.6 });
+      const [x, , size, start, dur] = BERGS[i];
+      const pan = (x / R) * 0.6;
+      // 溶けきった瞬間
+      for (let k = gone[i]((t - goneAt(i)) / PERIOD); k > 0; k--) {
+        sfx.drop(tone(6 + i), { gain: 0.2 + size * 0.08, decay: 0.8, pan });
+      }
+      // 溶けている間の滴り
+      for (let k = drips[i]((t - start) / DRIP); k > 0; k--) {
+        if (p > start && p < start + dur) sfx.drop(tone(11 + (i % 3)), { gain: 0.06, decay: 0.35, pan });
       }
     }
   },
