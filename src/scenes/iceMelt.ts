@@ -39,6 +39,8 @@ const RISE_STAGGER = 0.6;
 const RISE_DUR = 4.5;
 /** 溶けている間に水際から滴る波紋の間隔（秒） */
 const DRIP = 1.4;
+/** 最後の氷山が消えてから、溶け残りの滴が落ちるまでの秒数 */
+const LATE_DRIPS = [2.2, 5.0];
 
 /** 波紋: 振幅 / 滴りの振幅 / 広がる速さ / 波束の幅 / 波数 / 寿命 */
 const RIP_AMP = 0.16;
@@ -53,7 +55,9 @@ const SEG = 88;
 const color = new THREE.Color();
 const ICE_TINT = new THREE.Color(0xf4eee9);
 /** 氷の明るさ（ブルームのしきい値を大きく超えないよう、白から少し落とす） */
-const ICE_VALUE = 0.78;
+const ICE_VALUE = 0.9;
+/** 輪郭の明るさ（視線に対して寝ている面ほど明るくして、薄い氷の縁に見せる） */
+const RIM_GLOW = 0.32;
 
 let bergs: THREE.Mesh[] = [];
 let foams: THREE.Mesh[] = [];
@@ -108,6 +112,22 @@ function skyTexture(): THREE.DataTexture {
   return tex;
 }
 
+/** 氷の材質に、輪郭が淡く光る項と、陰の面を持ち上げる項を足す */
+function iceShader(mat: THREE.MeshPhysicalMaterial): void {
+  const rim = ember(new THREE.Color(), 0.95, 0, 0).lerp(ICE_TINT, 0.6).multiplyScalar(RIM_GLOW);
+  mat.onBeforeCompile = (sh) => {
+    sh.uniforms.uRim = { value: rim };
+    sh.fragmentShader = sh.fragmentShader
+      .replace('void main() {', 'uniform vec3 uRim;\nvoid main() {')
+      .replace(
+        '#include <opaque_fragment>',
+        `float facing = abs(dot(normalize(vViewPosition), normal));
+        outgoingLight += uRim * (pow(1.0 - facing, 2.0) + 0.35);
+        #include <opaque_fragment>`,
+      );
+  };
+}
+
 /** 角ばった氷山の形を 1 つ作る。頂点を固定シードで押し引きし、上へ尖らせる */
 function bergGeometry(seed: number): THREE.BufferGeometry {
   let s = seed;
@@ -160,8 +180,8 @@ export const iceMelt: SceneModule = {
     water = new THREE.Mesh(
       wg,
       new THREE.MeshStandardMaterial({
-        color: ember(new THREE.Color(), 0.22, 0, -0.1),
-        roughness: 0.1,
+        color: ember(new THREE.Color(), 0.2, 0, -0.16),
+        roughness: 0.22,
         metalness: 0.05,
         envMap: sky,
         envMapIntensity: 1.6,
@@ -176,18 +196,16 @@ export const iceMelt: SceneModule = {
       const m = new THREE.Mesh(
         bergGeometry(0.173 + i * 0.097),
         new THREE.MeshPhysicalMaterial({
-          roughness: 0.12,
+          roughness: 0.18,
           metalness: 0,
-          transmission: 0.7,
-          thickness: 1.2,
-          ior: 1.31,
           clearcoat: 1,
           clearcoatRoughness: 0.04,
           envMap: sky,
-          envMapIntensity: 1.2,
+          envMapIntensity: 0.8,
           flatShading: true,
         }),
       );
+      iceShader(m.material as THREE.MeshPhysicalMaterial);
       root.add(m);
       bergs.push(m);
       // 喫水線のまわりの淡い泡。浮いていることを見せる
@@ -207,7 +225,7 @@ export const iceMelt: SceneModule = {
 
     // 岸: 正方形の水面の角を覆う低い石の輪
     const bank = new THREE.Mesh(
-      new THREE.RingGeometry(R, R * 2.2, 128, 1),
+      new THREE.RingGeometry(R, R * 3.2, 128, 1),
       new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.95, metalness: 0 }),
     );
     bank.rotation.x = -Math.PI / 2;
@@ -269,6 +287,13 @@ export const iceMelt: SceneModule = {
       const [x, z, size, start, dur] = BERGS[i];
       const age = p - (start + dur);
       if (age > 0 && age < RIP_LIFE) act.push(x, z, RIP_AMP, age, 0);
+      // 最後の氷山が消えたあとも、溶け残りの滴が少し遅れて落ちる
+      if (i === 0) {
+        for (const lag of LATE_DRIPS) {
+          const a = age - lag;
+          if (a > 0 && a < RIP_LIFE) act.push(x + lag * 0.3, z - lag * 0.2, RIP_AMP * 0.55, a, 0);
+        }
+      }
       // 溶けている間に水際から滴る小さな波紋
       for (let n = 0; n * DRIP < dur; n++) {
         const a = p - (start + n * DRIP);
