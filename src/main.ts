@@ -102,6 +102,7 @@ function select(index: number): void {
 
   current = next;
   const mod = SCENES[current]!;
+  stage.setEnvironment(mod.environment ?? 1);
   mod.build(root);
   sceneTime = 0;
   autoTimer = 0;

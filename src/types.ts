@@ -12,6 +12,11 @@ export interface SceneModule {
     readonly pos: readonly [number, number, number];
     readonly target: readonly [number, number, number];
   };
+  /**
+   * 暖色の環境マップ（stage.ts）の映り込みの強さ。既定の強さに対する倍率で、省略すると 1。
+   * 反射させたくないシーンは 0 にする。material.envMap を自前で持つ材質には効かない。
+   */
+  readonly environment?: number;
   /** シーン開始時に1度だけ呼ばれる。追加するものはすべて root の子にする。 */
   build(root: THREE.Group): void;
   /**

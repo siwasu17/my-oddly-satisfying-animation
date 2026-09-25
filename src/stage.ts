@@ -14,6 +14,11 @@ const MAX_DISTANCE = 90;
 const REF_ASPECT = 16 / 9;
 /** 縦長画面での引きすぎ防止。被写体が小さくなりすぎない範囲に収める。 */
 const MAX_FIT = 3;
+/**
+ * 環境マップの映り込みの強さ（scene.environmentIntensity）。
+ * 金属やガラスに「部屋の明かり」が薄く映る程度に留める。上げすぎると暗部が持ち上がって眠くない。
+ */
+const ENV_INTENSITY = 0.3;
 
 /**
  * 画面が縦長なほどカメラを後ろへ下げる倍率。
@@ -35,6 +40,11 @@ export interface Stage {
   controls: OrbitControls;
   composer: EffectComposer;
   resize(): void;
+  /**
+   * 環境マップの映り込みを、既定の強さに対する倍率で決める。0 で映さない。
+   * シーンを切り替えるたびに SceneModule.environment を渡して呼ぶ。
+   */
+  setEnvironment(scale: number): void;
 }
 
 /** レンダラ・カメラ・ライティング・ポストプロセスをまとめて用意する。 */
@@ -55,6 +65,8 @@ export function createStage(container: HTMLElement): Stage {
   scene.background = new THREE.Color(BG);
   const fog = new THREE.FogExp2(BG, FOG_DENSITY);
   scene.fog = fog;
+  scene.environment = warmEnvironment(renderer);
+  scene.environmentIntensity = ENV_INTENSITY;
 
   const camera = new THREE.PerspectiveCamera(
     48,
@@ -130,7 +142,63 @@ export function createStage(container: HTMLElement): Stage {
   resize();
   watchDpr();
 
-  return { renderer, scene, camera, controls, composer, resize };
+  function setEnvironment(scale: number): void {
+    scene.environmentIntensity = ENV_INTENSITY * Math.max(scale, 0);
+  }
+
+  return { renderer, scene, camera, controls, composer, resize, setEnvironment };
+}
+
+/**
+ * 金属やガラスに映り込ませる「ろうそくが数本灯った暗い部屋」を焼く。
+ *
+ * envMap が無いと、艶のある面は「暗い面に白い点が 1 つ」になりやすい。
+ * かといって RoomEnvironment は白い蛍光灯の部屋なので、映り込みに青白さが混ざる。
+ * ここでは暖色の光だけで小さな部屋を組み、PMREM でぼかして使う。
+ * 色は palette.ts の帯（薔薇〜琥珀）に合わせ、青の成分を赤・緑より大きくしない。
+ *
+ * 1 度だけ焼けばよいので、シーン側からは触らない。
+ * シーンが自前で material.envMap を持っている場合（Dice Field など）はそちらが優先される。
+ */
+function warmEnvironment(renderer: THREE.WebGLRenderer): THREE.Texture {
+  const room = new THREE.Scene();
+  const disposables: { dispose(): void }[] = [];
+  const add = (
+    geo: THREE.BufferGeometry,
+    rgb: readonly [number, number, number],
+    gain: number,
+    at: readonly [number, number, number],
+    side: THREE.Side = THREE.FrontSide,
+  ): void => {
+    const mat = new THREE.MeshBasicMaterial({ side });
+    // 1 を超える値を入れて HDR の光源にする（PMREM は浮動小数のターゲットへ焼く）
+    mat.color.setRGB(rgb[0] * gain, rgb[1] * gain, rgb[2] * gain, THREE.LinearSRGBColorSpace);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(...at);
+    room.add(mesh);
+    disposables.push(geo, mat);
+  };
+
+  // 壁・床・天井。ほぼ黒だが、映り込んだときに輪郭が溶けない程度の暖色を残す
+  add(new THREE.SphereGeometry(10, 32, 16), [0.05, 0.028, 0.022], 1, [0, 0, 0], THREE.BackSide);
+  // 床からの照り返し。艶のある床に置いた物の下半分が沈みすぎないように
+  const floor = new THREE.CircleGeometry(9, 32);
+  floor.rotateX(-Math.PI / 2);
+  add(floor, [0.09, 0.045, 0.03], 1, [0, -6, 0]);
+  // ろうそく色の光源を 3 つ。高さと大きさを散らし、ハイライトが 1 点に揃わないようにする
+  add(new THREE.SphereGeometry(0.9, 16, 8), [1, 0.56, 0.26], 16, [6, 3.5, 4]);
+  add(new THREE.SphereGeometry(1.4, 16, 8), [1, 0.42, 0.24], 7, [-7, 2, -3]);
+  add(new THREE.SphereGeometry(0.6, 16, 8), [1, 0.36, 0.3], 10, [1.5, 5, -7]);
+  // 天井の大きく弱い明かり。上を向いた面が真っ黒にならないように
+  const ceil = new THREE.CircleGeometry(4, 32);
+  ceil.rotateX(Math.PI / 2);
+  add(ceil, [1, 0.62, 0.4], 0.9, [0, 7.5, 0]);
+
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const target = pmrem.fromScene(room, 0.04);
+  pmrem.dispose();
+  for (const d of disposables) d.dispose();
+  return target.texture;
 }
 
 /** シーン切替時に、そのシーンが確保した GPU リソースを解放する。 */
