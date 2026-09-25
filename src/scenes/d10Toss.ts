@@ -461,6 +461,7 @@ export const d10Toss: SceneModule = {
   name: 'D10 Toss',
   desc: 'ルーンを刻んだ 10 面ダイスを一斉に撒く。跳ねて転がって止まり、上を向いた面が灯る。',
   camera: { pos: [3.8, 10.4, 14.8], target: [0, 0.5, 0] },
+  shadows: true,
 
   build(root) {
     const floor = new THREE.Mesh(

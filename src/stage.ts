@@ -20,6 +20,10 @@ const MAX_FIT = 3;
  * 金属やガラスに「部屋の明かり」が薄く映る程度に留める。上げすぎると暗部が持ち上がって眠くない。
  */
 const ENV_INTENSITY = 0.3;
+/** key light から見た向き。影を使わないシーンでも、光の向きはこれで決まる。 */
+const KEY_DIR = new THREE.Vector3(8, 18, 10).normalize();
+/** 影の解像度。影の範囲はシーンごとに変わるので、狭いシーンほど細かくなる。 */
+const SHADOW_MAP_SIZE = 2048;
 
 /**
  * 画面が縦長なほどカメラを後ろへ下げる倍率。
@@ -46,6 +50,12 @@ export interface Stage {
    * シーンを切り替えるたびに SceneModule.environment を渡して呼ぶ。
    */
   setEnvironment(scale: number): void;
+  /**
+   * key light に影を落とさせるかどうか。シーンを build した直後に root を渡して呼ぶ。
+   * on のときは center を中心に半径 extent の範囲へ影を落とし、root 以下のメッシュの
+   * castShadow / receiveShadow を材質から決める（applyShadowFlags を参照）。
+   */
+  setShadows(on: boolean, root: THREE.Object3D, center: THREE.Vector3Like, extent: number): void;
 }
 
 /** レンダラ・カメラ・ライティング・ポストプロセスをまとめて用意する。 */
@@ -54,9 +64,12 @@ export function createStage(container: HTMLElement): Stage {
     antialias: true,
     powerPreference: 'high-performance',
   });
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  // 就寝前に眺める前提なので、全体の明るさは控えめに
-  renderer.toneMappingExposure = 0.92;
+  // ACES は明るい暖色を黄〜白へ寄せて飛ばすので、色相を保つ Neutral を使う。
+  // AgX は中間調が持ち上がって全体が灰色がかるため見送った。
+  renderer.toneMapping = THREE.NeutralToneMapping;
+  // 就寝前に眺める前提なので、全体の明るさは控えめに。
+  // Neutral は ACES より中間調が明るく出るので、ACES 0.92 と平均輝度が揃う 0.8 にしてある
+  renderer.toneMappingExposure = 0.8;
   // 透過（transmission）を使うのはピタゴラ装置の珠と水面くらい。その 1 パスのために
   // 毎フレーム全画面をもう一度描くのは重いので、半分の解像度で足りるようにする。
   renderer.transmissionResolutionScale = 0.5;
@@ -88,8 +101,19 @@ export function createStage(container: HTMLElement): Stage {
   // 光源も青を避け、ろうそくの灯りのような色温度で揃える
   scene.add(new THREE.HemisphereLight(0xffd0a8, 0x140d0c, 0.9));
   const key = new THREE.DirectionalLight(0xffd9b4, 1.25);
-  key.position.set(8, 18, 10);
+  key.position.copy(KEY_DIR);
   scene.add(key);
+  scene.add(key.target);
+  // 影の既定値。使うかどうかはシーンが決める（setShadows）
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  key.shadow.mapSize.set(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
+  // 輪郭は硬くしない。ろうそくの明かりのように、ぼんやりした接地影に留める
+  key.shadow.radius = 5;
+  key.shadow.bias = -0.0004;
+  key.shadow.normalBias = 0.03;
+  // 影が真っ黒だと穴に見えるので、下地の明るさを少し残す
+  key.shadow.intensity = 0.75;
   const rimA = new THREE.PointLight(0xff9457, 200, 120, 2);
   rimA.position.set(-18, 10, -14);
   scene.add(rimA);
@@ -148,7 +172,60 @@ export function createStage(container: HTMLElement): Stage {
     scene.environmentIntensity = ENV_INTENSITY * Math.max(scale, 0);
   }
 
-  return { renderer, scene, camera, controls, composer, resize, setEnvironment };
+  function setShadows(
+    on: boolean,
+    root: THREE.Object3D,
+    center: THREE.Vector3Like,
+    extent: number,
+  ): void {
+    // 向きは変えずに、影の範囲の中心へ key light ごと寄せる
+    key.target.position.copy(center);
+    key.position.copy(KEY_DIR).multiplyScalar(extent * 2).add(center);
+    key.castShadow = on;
+    if (!on) return;
+
+    const cam = key.shadow.camera;
+    cam.left = -extent;
+    cam.right = extent;
+    cam.top = extent;
+    cam.bottom = -extent;
+    cam.near = 0.5;
+    cam.far = extent * 4;
+    cam.updateProjectionMatrix();
+    applyShadowFlags(root);
+  }
+
+  return { renderer, scene, camera, controls, composer, resize, setEnvironment, setShadows };
+}
+
+/** 光の計算をする材質か。MeshBasicMaterial や自前のシェーダは影を受けも落としもしない。 */
+function isLit(m: THREE.Material): boolean {
+  return (
+    (m as THREE.MeshStandardMaterial).isMeshStandardMaterial === true ||
+    (m as THREE.MeshPhongMaterial).isMeshPhongMaterial === true ||
+    (m as THREE.MeshLambertMaterial).isMeshLambertMaterial === true ||
+    (m as THREE.MeshToonMaterial).isMeshToonMaterial === true
+  );
+}
+
+/**
+ * 影を使うシーンで、メッシュごとに影を落とす / 受けるを決める。
+ *
+ * - 光を受ける材質なら影を受ける。
+ * - そのうえ不透明なら影を落とす。半透明のガラスやにじみの板が濃い影を落とすと嘘に見える。
+ * - userData.shadow === false のものは両方とも外す（光の芯・映り込み用の板など、シーン側の判断）。
+ */
+function applyShadowFlags(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const lit = mats.every(isLit);
+    const opaque = mats.every((m) => !m.transparent);
+    const allowed = o.userData.shadow !== false;
+    mesh.receiveShadow = allowed && lit;
+    mesh.castShadow = allowed && lit && opaque;
+  });
 }
 
 /**

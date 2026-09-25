@@ -9,6 +9,8 @@ import { registerServiceWorker } from './pwa.ts';
 const AUTO_SWITCH_SEC = 34;
 /** カメラが定位置へ移動しきるまでの秒数 */
 const CAM_TWEEN_SEC = 2.0;
+/** 影を落とす範囲の半径。カメラの定位置から注視点までの距離に対する割合。 */
+const SHADOW_REACH = 0.8;
 /** 効果音の ON/OFF を覚えておく localStorage のキー */
 const SOUND_KEY = 'oddly:sound';
 
@@ -104,6 +106,10 @@ function select(index: number): void {
   const mod = SCENES[current]!;
   stage.setEnvironment(mod.environment ?? 1);
   mod.build(root);
+  const target = new THREE.Vector3(...mod.camera.target);
+  // 影の範囲は、定位置のカメラから見える広さに合わせる
+  const reach = target.distanceTo(new THREE.Vector3(...mod.camera.pos)) * SHADOW_REACH;
+  stage.setShadows(mod.shadows === true, root, target, reach);
   sceneTime = 0;
   autoTimer = 0;
 
