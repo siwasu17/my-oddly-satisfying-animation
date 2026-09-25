@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { SceneModule } from '../types.ts';
-import { tone, ticker } from '../audio.ts';
-import { SURFACE, ember, emberColor, drift } from '../palette.ts';
+import type { SceneModule } from '../../types.ts';
+import { tone, ticker } from '../../audio.ts';
+import { SURFACE, ember, emberColor, drift } from '../../palette.ts';
 
 /**
  * Soap Carving — 石鹸を削る（ASMR の定番「格子切り」）。
