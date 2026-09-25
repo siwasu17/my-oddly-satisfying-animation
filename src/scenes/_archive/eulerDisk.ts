@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { SceneModule } from '../types.ts';
-import { tone, ticker } from '../audio.ts';
-import { SURFACE, ember, emberColor, drift } from '../palette.ts';
+import type { SceneModule } from '../../types.ts';
+import { tone, ticker } from '../../audio.ts';
+import { SURFACE, ember, emberColor, drift } from '../../palette.ts';
 
 /**
  * 何が動くか: 鏡の台の上で、分厚い金属の円盤が縁で立ったまま首を振って転がる。
