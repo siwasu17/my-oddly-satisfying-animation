@@ -25,7 +25,7 @@ const WALL = 0.07;
 /** 1 つ小さくなるごとの縮み */
 const SHRINK = 0.115;
 /** まわりに並べる輪の半径 */
-const HOME_R = 4.3;
+const HOME_R = 3.9;
 
 /** 入れる動き：1 つあたりの秒数と、そのうち弧を描いて真上へ運ぶ割合 */
 const D_IN = 2.2;
@@ -45,8 +45,8 @@ const OUT_START = NEST_END + HOLD_IN;
 const PERIOD = OUT_START + (N - 1) * D_OUT + HOLD_OUT;
 
 /** カメラ */
-const CAM_POS: [number, number, number] = [0, 6.5, 8.9];
-const CAM_TARGET: [number, number, number] = [0, 1.1, 0];
+const CAM_POS: [number, number, number] = [0, 8.2, 8.4];
+const CAM_TARGET: [number, number, number] = [0, 0.4, 0.6];
 
 const scaleOf = (k: number): number => 1 - k * SHRINK;
 
