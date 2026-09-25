@@ -151,7 +151,7 @@ function hermite(s: number, outP: THREE.Vector3, outT: THREE.Vector3): void {
 export const hermiteLaser: SceneModule = {
   name: 'Hermite Laser',
   desc: '扇状に撃ち出したホーミングレーザーが、エルミート曲線を描いて編隊を左から順に撃ち抜く。',
-  camera: { pos: [0, 19, 12.5], target: [0, 0, 0.5] },
+  camera: { pos: [0, 21.5, 14], target: [0, 0, 0.5] },
   environment: 0.6,
 
   build(root) {
@@ -350,7 +350,8 @@ export const hermiteLaser: SceneModule = {
         hermite(st + (sh - st) * u, pos, tan);
         side.crossVectors(tan, up);
         if (side.lengthSq() < 1e-8) side.set(1, 0, 0);
-        side.normalize().multiplyScalar(WIDTH * Math.pow(u, 0.6));
+        // 尾は細く、先端も光点へ向けて絞る
+        side.normalize().multiplyScalar(WIDTH * Math.pow(u, 0.6) * Math.min(1, (1 - u) * 6 + 0.2));
         ribPos[a] = pos.x - side.x;
         ribPos[a + 1] = pos.y - side.y;
         ribPos[a + 2] = pos.z - side.z;
