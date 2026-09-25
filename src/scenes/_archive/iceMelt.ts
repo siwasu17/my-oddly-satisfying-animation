@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
-import type { SceneModule } from '../types.ts';
-import { tone, tickers } from '../audio.ts';
-import { SURFACE, ember, drift } from '../palette.ts';
+import type { SceneModule } from '../../types.ts';
+import { tone, tickers } from '../../audio.ts';
+import { SURFACE, ember, drift } from '../../palette.ts';
 
 /**
  * Ice Melt。
