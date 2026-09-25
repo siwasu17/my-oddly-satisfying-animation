@@ -56,14 +56,19 @@ const BOARD_H = 0.3;
 const SWAP_DIST = 14;
 
 /** 石鹸の色: ember の n と、淡くするために混ぜる暖かい白と、その割合 */
-const SOAP_N = [0.76, 0.87, 0.97];
+const SOAP_N = [0.12, 0.3, 0.97];
 const SOAP_SHIFT = [0.0, 0.02, -0.02];
-const SOAP_PALE = new THREE.Color(0xe6d9ce);
-const SOAP_PALE_MIX = 0.71;
+const SOAP_PALE = new THREE.Color(0xfff0ea);
+const SOAP_PALE_MIX = 0.82;
+/**
+ * 上を向いた面だけに掛ける陰。天面は平行光をまともに受けてブルームでにじむので、
+ * 正面を淡いまま保ちつつ、天面だけしきい値の下へ抑える
+ */
+const TOP_SHADE = 0.62;
 /** 切り込みの溝の暗さ（石鹸色に掛ける） */
-const GROOVE_DARK = 0.18;
+const GROOVE_DARK = 0.5;
 /** 溝の太さと、面から出す厚み */
-const GROOVE_W = 0.1;
+const GROOVE_W = 0.05;
 const GROOVE_D = 0.02;
 
 // --- 小道具 -----------------------------------------------------------------
@@ -104,6 +109,20 @@ let lineTick = ticker();
 let rowTick = ticker();
 let swapTick = ticker();
 
+/** 上を向いた面の頂点だけ TOP_SHADE で暗くする頂点カラーを付ける */
+function shadeTop(geo: THREE.BufferGeometry): THREE.BufferGeometry {
+  const n = geo.getAttribute('normal');
+  const c = new Float32Array(n.count * 3);
+  for (let i = 0; i < n.count; i++) {
+    const k = n.getY(i) > 0.5 ? TOP_SHADE : 1;
+    c[i * 3] = k;
+    c[i * 3 + 1] = k;
+    c[i * 3 + 2] = k;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(c, 3));
+  return geo;
+}
+
 function makeTray(root: THREE.Group): Tray {
   const group = new THREE.Group();
   root.add(group);
@@ -115,17 +134,17 @@ function makeTray(root: THREE.Group): Tray {
   board.position.set((BOARD_X0 + BOARD_X1) / 2, -BOARD_H / 2, (BOARD_Z0 + BOARD_Z1) / 2);
   group.add(board);
 
-  const mat = new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0.0 });
+  const mat = new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0.0, vertexColors: true });
   const grooveMat = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0.0 });
 
   // 本体: 背面から「いま削っている層」の手前までの直方体。z のスケールで奥行きを変える
-  const bodyGeo = new THREE.BoxGeometry(S, S, 1);
+  const bodyGeo = shadeTop(new THREE.BoxGeometry(S, S, 1));
   bodyGeo.translate(0, S / 2, 0.5); // 背面を原点に
   const body = new THREE.Mesh(bodyGeo, mat);
   body.position.z = -S / 2;
   group.add(body);
 
-  const cubes = new THREE.InstancedMesh(new THREE.BoxGeometry(CELL, CELL, CELL), mat, CUBES);
+  const cubes = new THREE.InstancedMesh(shadeTop(new THREE.BoxGeometry(CELL, CELL, CELL)), mat, CUBES);
   cubes.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   // 最初のフレームの配置で包み球が決まってしまうので、視錐台カリングを切る
   cubes.frustumCulled = false;
@@ -312,10 +331,11 @@ export const soapCarving: SceneModule = {
       FALL[f + 1] = (rnd() - 0.5) * 0.9;
       FALL[f + 2] = 0.5 + rnd() * 1.4;
       FALL[f + 3] = CELL / 2 + rnd() * 0.12 * (j + 1);
-      // 休むときは面が下を向くよう、x と z の回転は 90° の倍数
-      FALL[f + 4] = (Math.PI / 2) * Math.floor(rnd() * 3);
+      // 落ちる間に 1 回転するか、しないか。着地では元の上面が上に戻るので、
+      // 陰を付けた面が上を向き、山が本体より明るく光らない
+      FALL[f + 4] = rnd() < 0.5 ? 0 : Math.PI * 2;
       FALL[f + 5] = (rnd() - 0.5) * 1.6;
-      FALL[f + 6] = (Math.PI / 2) * Math.floor(rnd() * 3 - 1);
+      FALL[f + 6] = 0;
     }
 
     cur = makeTray(root);
