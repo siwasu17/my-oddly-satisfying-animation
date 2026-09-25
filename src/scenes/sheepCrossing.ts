@@ -13,7 +13,7 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
  * 羊の胴は小さな毛玉を楕円体の表面に 20 個ほど貼り合わせたもの。足が地面を
  * 蹴るたびに胴が跳ね、着地で毛玉ごとぷにっと潰れて戻る。毛玉は 1 つずつ
  * 位相をずらして膨らむので、歩くたびに毛並みがふわふわ揺れて見える。
- * 群れの中に 1 頭だけ黒い羊が混じっている。
+ * 群れの中に 1 頭だけ焦げ茶の羊が混じっている。
  *
  * 位置はすべて t から作る（x は t の剰余）ので、周期 L / V 秒で必ず元に戻る。
  * 音は羊が道の中央線をまたぐたびに、柔らかい爪弾きが 1 つずつ鳴る。
@@ -37,7 +37,7 @@ const L = 38;
 const X0 = -16;
 /** t = 0 の時点で群れの先頭がどこまで来ているか（開いた瞬間を空にしない） */
 const T0 = 10;
-/** 黒い羊の番号 */
+/** 焦げ茶の羊の番号 */
 const BLACK = 4;
 
 // ---- 羊 1 頭の形 ----
@@ -46,9 +46,9 @@ const PUFFS = 20;
 /** 胴の楕円体の半径（x: 前後 / y: 上下 / z: 左右） */
 const BODY_R = new THREE.Vector3(0.6, 0.32, 0.34);
 /** 胴の中心の高さ */
-const BODY_Y = 0.98;
+const BODY_Y = 1.1;
 /** 足の長さ（腰から地面まで） */
-const LEG_LEN = 0.62;
+const LEG_LEN = 0.74;
 /** 歩調（歩/秒）。胴が 1 秒にこの回数跳ねる */
 const STEP_HZ = 1.9;
 /** 胴が跳ねる高さ */
@@ -60,8 +60,8 @@ const ROAD_LEN = 70;
 /** 中央線の破線の本数 */
 const DASH_N = 16;
 
-/** 頭と足の色。光らない SURFACE をさらに落として、毛の明るさを立たせる */
-const DARK = new THREE.Color(SURFACE).multiplyScalar(0.35);
+/** 頭と足の色。暗い地面に溶けない中間の明るさで、毛よりははっきり暗くする */
+const DARK = emberColor(0.24, 0, -0.05);
 
 const dummy = new THREE.Object3D();
 const color = new THREE.Color();
@@ -113,7 +113,7 @@ export const sheepCrossing: SceneModule = {
         sheep[i * 5 + 1] = (r - (ROWS - 1) / 2) * ROW_GAP + (rnd() - 0.5) * 0.5;
         sheep[i * 5 + 2] = rnd() * Math.PI * 2;
         sheep[i * 5 + 3] = rnd() * Math.PI * 2;
-        sheep[i * 5 + 4] = i === BLACK ? 0.02 : 0.9 + rnd() * 0.1;
+        sheep[i * 5 + 4] = i === BLACK ? 0.34 : 0.8 + rnd() * 0.08;
       }
     }
 
@@ -232,7 +232,7 @@ export const sheepCrossing: SceneModule = {
       mBody.compose(v.set(0, bodyY, 0), q, sc.set(1 + 0.05 * sq, 1 - 0.1 * sq, 1 + 0.05 * sq));
       mBody.premultiply(mSheep);
 
-      ember(color, sheep[i * 5 + 4], hue, i === BLACK ? 0.03 : -0.08);
+      ember(color, sheep[i * 5 + 4], hue, -0.14);
       for (let k = 0; k < PUFFS + 2; k++) {
         const j = k * 5;
         const r = puffs[j + 3] * (1 + 0.08 * Math.sin(2 * g + puffs[j + 4]));
@@ -246,15 +246,15 @@ export const sheepCrossing: SceneModule = {
       // 頭: 歩調に合わせて小さくうなずく。耳は頭の左右に寝かせる
       const nod = 0.12 * Math.sin(2 * g + 0.8);
       dummy.rotation.set(0, 0, -0.25 + nod);
-      dummy.position.set(1.0, bodyY + 0.12 + nod * 0.3, 0);
-      dummy.scale.set(0.36, 0.24, 0.23);
+      dummy.position.set(1.12, bodyY + 0.1 + nod * 0.3, 0);
+      dummy.scale.set(0.5, 0.34, 0.32);
       dummy.updateMatrix();
       heads.setMatrixAt(i * 3, mPart.multiplyMatrices(mSheep, dummy.matrix));
       for (let e = 0; e < 2; e++) {
         const side = e === 0 ? 1 : -1;
         dummy.rotation.set(side * 0.9, 0, 0);
-        dummy.position.set(0.9, bodyY + 0.24 + nod * 0.3, side * 0.27);
-        dummy.scale.set(0.08, 0.18, 0.06);
+        dummy.position.set(0.98, bodyY + 0.26 + nod * 0.3, side * 0.36);
+        dummy.scale.set(0.1, 0.24, 0.08);
         dummy.updateMatrix();
         heads.setMatrixAt(i * 3 + 1 + e, mPart.multiplyMatrices(mSheep, dummy.matrix));
       }
