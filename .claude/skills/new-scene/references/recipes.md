@@ -44,6 +44,7 @@ interface SceneModule {
   desc: string;                                        // タイトル下の 1 行
   camera: { pos: [number, number, number]; target: [number, number, number] };
   environment?: number;                                // 暖色の環境マップの映り込み倍率。既定 1、0 で無し
+  shadows?: boolean;                                   // 床に物が転がるシーンだけ true。接地影が出る
   build(root: THREE.Group): void;                      // 開くたびに呼ばれる
   update(t: number, dt: number): void;                 // t = このシーンの経過秒（切替で 0 に戻る）
   sound?(t: number, dt: number, sfx: Sfx): void;       // 音が ON のときだけ呼ばれる
