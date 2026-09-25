@@ -39,7 +39,7 @@ const LAG = 0.38;
 const BOOM = 1.1;
 
 /** 扇の半角（ラジアン）。外側のレーザーはほぼ真横へ出る */
-const FAN = 2.05;
+const FAN = 1.85;
 /** 出だしと着弾の接線の長さ。大きいほど大きく膨らむ */
 const K0 = 24;
 const K1 = 9;
@@ -151,7 +151,7 @@ function hermite(s: number, outP: THREE.Vector3, outT: THREE.Vector3): void {
 export const hermiteLaser: SceneModule = {
   name: 'Hermite Laser',
   desc: '扇状に撃ち出したホーミングレーザーが、エルミート曲線を描いて編隊を左から順に撃ち抜く。',
-  camera: { pos: [0, 13, 13.5], target: [0, 0, -3] },
+  camera: { pos: [0, 19, 12.5], target: [0, 0, 0.5] },
   environment: 0.6,
 
   build(root) {
@@ -201,7 +201,7 @@ export const hermiteLaser: SceneModule = {
       });
 
     // ロックオンの菱形（4 分割のリング = 菱形の枠）
-    const rg = new THREE.RingGeometry(0.95, 1.04, 4, 1);
+    const rg = new THREE.RingGeometry(0.98, 1.03, 4, 1);
     reticles = new THREE.InstancedMesh(rg, glow(), N);
     reticles.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     root.add(reticles);
@@ -302,7 +302,7 @@ export const hermiteLaser: SceneModule = {
       dummy.scale.setScalar(lockOn ? 2.6 - 1.5 * pop : 0);
       dummy.updateMatrix();
       reticles.setMatrixAt(i, dummy.matrix);
-      ember(color, 0.8, hue).multiplyScalar(0.3 + 0.25 * pop);
+      ember(color, 0.8, hue).multiplyScalar(0.12 + 0.13 * pop);
       reticles.setColorAt(i, color);
 
       // 爆発の閃光と破片
