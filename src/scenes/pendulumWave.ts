@@ -56,7 +56,7 @@ function angle(i: number, t: number): number {
 export const pendulumWave: SceneModule = {
   name: 'Pendulum Wave',
   desc: '長さの違う 16 個の振り子がうねり、割れ、48 秒ごとに一列へ戻ってくる。',
-  camera: { pos: [0, 19, 10.5], target: [0, 3, -0.6] },
+  camera: { pos: [0, 17.5, 9.6], target: [0, 3, -0.6] },
 
   build(root) {
     ticks = tickers(N);
@@ -70,7 +70,7 @@ export const pendulumWave: SceneModule = {
       pend[i * 3 + 2] = L_MAX * (f0 / f) ** 2;
     }
 
-    const frameMat = new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.45, metalness: 0.7 });
+    const frameMat = new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.85, metalness: 0.15 });
     const halfW = ((N - 1) / 2) * GAP + 0.7;
 
     const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, halfW * 2, 16), frameMat);
@@ -86,7 +86,7 @@ export const pendulumWave: SceneModule = {
 
     const floor = new THREE.Mesh(
       new THREE.CircleGeometry(14, 96),
-      new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.25, metalness: 0.9 }),
+      new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.55, metalness: 0.5 }),
     );
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.02;
