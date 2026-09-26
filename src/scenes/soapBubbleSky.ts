@@ -18,12 +18,12 @@ import { emberColor } from '../palette.ts';
 // ---- 調整する数値はここにまとめる ----------------------------------------
 
 /** シャボン玉の数 */
-const COUNT = 44;
+const COUNT = 60;
 /** 生まれる高さ（画面の下より少し下） */
 const BOTTOM = -11;
 /** この高さまで昇るあいだに、透明から濃くなる。丘の稜線より下では見えない（丘の向こうから昇ってくる） */
-const FADE_FROM = 3;
-const FADE_TO = 8;
+const FADE_FROM = 2.5;
+const FADE_TO = 6.5;
 /** 弾ける高さの範囲。上限は画面上端のタブより下 */
 const POP_MIN = 8.5;
 const POP_MAX = 15.5;
@@ -221,7 +221,7 @@ export const soapBubbleSky: SceneModule = {
       bubbles[o + 1] = Z_FAR + (Z_NEAR - Z_FAR) * zr;
       // 大きい玉ほど少なく
       const rr = rnd();
-      bubbles[o + 2] = R_MIN + (R_MAX - R_MIN) * rr * rr;
+      bubbles[o + 2] = R_MIN + (R_MAX - R_MIN) * rr * rr * rr;
       bubbles[o + 3] = SPEED_MIN + (SPEED_MAX - SPEED_MIN) * rnd();
       bubbles[o + 4] = POP_MIN + (POP_MAX - POP_MIN) * rnd();
       bubbles[o + 5] = REST_MAX * rnd();
