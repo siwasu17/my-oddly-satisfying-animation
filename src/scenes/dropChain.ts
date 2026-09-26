@@ -75,7 +75,7 @@ const LAYOUTS: Layout[] = [
 /** 色ごとの [ember の n, 色相のずらし, 明度の持ち上げ]。暖色帯の中で明度と色相をできるだけ離す */
 const COLORS: [number, number, number][] = [
   [0.0, -0.04, 0.06],
-  [0.45, 0.04, -0.1],
+  [0.33, -0.03, -0.02],
   [0.7, -0.035, -0.05],
   [1.0, 0.04, -0.06],
 ];
@@ -442,9 +442,11 @@ export const dropChain: SceneModule = {
         sy = size - jig;
         glow = 0.25 * q;
       }
+      // 盤の上端をくぐるまでは見せない（盤の外で浮いて見えないように、縁から膨らんで入る）
+      const enter = Math.min(1, Math.max(0, H - 0.3 - row));
       dummy.position.set(x, worldY(row) - (1 - sy) * BLOB_R, 0);
       dummy.rotation.set(0, 0, 0);
-      dummy.scale.set(sx, sy, sx);
+      dummy.scale.set(sx * enter, sy * enter, sx * enter);
       dummy.updateMatrix();
       balls.setMatrixAt(i, dummy.matrix);
       ember(color, cn, hue + cs, cg + glow);
