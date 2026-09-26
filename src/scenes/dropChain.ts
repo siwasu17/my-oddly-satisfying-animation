@@ -38,10 +38,10 @@ const TRIGGER_COLOR = 2;
 
 /** 色ごとの [ember の n, 色相のずらし, 明度の持ち上げ]。暖色帯の中で明度と色相をできるだけ離す */
 const COLORS: [number, number, number][] = [
-  [0.0, -0.04, 0.1],
-  [0.33, 0.04, 0.05],
-  [0.66, -0.035, 0.0],
-  [1.0, 0.04, 0.1],
+  [0.0, -0.04, 0.17],
+  [0.4, 0.04, -0.05],
+  [0.68, -0.035, 0.03],
+  [0.94, 0.04, -0.09],
 ];
 
 // ---- 時間 --------------------------------------------------------------
@@ -244,8 +244,8 @@ export const dropChain: SceneModule = {
 
     // 床
     const floor = new THREE.Mesh(
-      new THREE.CircleGeometry(9, 96),
-      new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.7, metalness: 0.3 }),
+      new THREE.CircleGeometry(6.5, 96),
+      new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.92, metalness: 0.1 }),
     );
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.02;
