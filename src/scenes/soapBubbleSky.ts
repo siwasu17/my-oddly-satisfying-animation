@@ -22,8 +22,8 @@ const COUNT = 44;
 /** 生まれる高さ（画面の下より少し下） */
 const BOTTOM = -11;
 /** この高さまで昇るあいだに、薄い姿から濃くなる（画面の下端の文字に玉が溜まらない） */
-const FADE_FROM = -4;
-const FADE_TO = 3;
+const FADE_FROM = -1;
+const FADE_TO = 5;
 /** 弾ける高さの範囲 */
 const POP_MIN = 7;
 const POP_MAX = 21;
@@ -43,8 +43,12 @@ const R_MAX = 1.35;
 const WIND = 0.35;
 const SWAY = 0.9;
 /** 弾ける演出の長さ（秒）と、そのときふくらむ量 */
-const POP_DUR = 0.16;
-const POP_GROW = 0.35;
+const POP_DUR = 0.45;
+const POP_GROW = 0.18;
+/** 弾けたときに散るしずくの数（玉 1 個あたり）と、飛ぶ距離（半径の倍率）と大きさ */
+const DROPS = 6;
+const DROP_REACH = 2.2;
+const DROP_SIZE = 0.07;
 /** 膜の明るさ。bloom（明度 0.28）で滲む量はほぼこれで決まる */
 const FILM_GAIN = 0.8;
 /** ハイライトの明るさ */
@@ -118,17 +122,25 @@ void main() {
               * sin(p.z * 2.7 - uTime * 0.5 + seed * 3.1)
               + 0.5 * sin(p.y * 4.3 + p.x * 1.7 + uTime * 0.9 + seed * 9.7);
   float thick = -p.y * 0.45 + swirl * 0.22 + (1.0 - ndv) * 0.55 + seed * 3.0 + uTime * 0.03;
-  vec3 col = film(thick) * (0.08 + 1.35 * fres) * uFilmGain;
+  // 現れたばかりの薄い玉は、縁だけが先に見えて中身は透けている
+  float vis = vState.z;
+  vec3 col = film(thick) * (0.08 * vis * vis * vis + 1.35 * fres * vis) * uFilmGain;
+
+  // 弾けるときは、膜の 1 か所に穴が開いて一気に広がる
+  vec3 hd = normalize(vec3(sin(seed * 40.0), cos(seed * 23.0), sin(seed * 17.0)));
+  float h = dot(normalize(p), hd);
+  float edge = 1.0 - 2.3 * pop;
+  if (pop > 0.0 && h > edge) discard;
+  col += film(thick + 0.3) * smoothstep(0.18, 0.0, edge - h) * step(0.001, pop) * 0.6 * uFilmGain;
 
   // 空の明るいほう（左上）を映した窓のようなハイライトと、下の小さな照り返し
   vec3 r = reflect(-v, n);
   float hi = pow(max(dot(r, normalize(vec3(-0.45, 0.75, 0.5))), 0.0), 48.0);
   float lo = pow(max(dot(r, normalize(vec3(0.5, -0.6, 0.6))), 0.0), 90.0) * 0.35;
-  col += uSpec * (hi + lo) * uSpecGain;
+  col += uSpec * (hi + lo) * uSpecGain * vis;
 
-  // 弾ける瞬間は縁が一瞬明るくなって、すっと抜ける
-  float fade = 1.0 - smoothstep(0.0, 1.0, pop);
-  col *= fade * vState.z * (1.0 + 1.6 * pop * (1.0 - pop) * 4.0 * fres);
+  // 残った膜は穴が広がるにつれて抜けていく
+  col *= 1.0 - smoothstep(0.5, 1.0, pop);
 
   gl_FragColor = vec4(col, 1.0);
   #include <tonemapping_fragment>
@@ -173,6 +185,7 @@ void main() {
 const dummy = new THREE.Object3D();
 
 let mesh: THREE.InstancedMesh;
+let drops: THREE.InstancedMesh;
 let state: THREE.InstancedBufferAttribute;
 let filmMat: THREE.ShaderMaterial;
 
@@ -273,6 +286,22 @@ export const soapBubbleSky: SceneModule = {
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     mesh.frustumCulled = false;
     root.add(mesh);
+
+    // 弾けたときに散るしずく。ふだんは大きさ 0 で見えない
+    drops = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(1, 8, 6),
+      new THREE.MeshBasicMaterial({
+        color: emberColor(0.85, 0, 0.12),
+        transparent: true,
+        opacity: 0.8,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+      COUNT * DROPS,
+    );
+    drops.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    drops.frustumCulled = false;
+    root.add(drops);
   },
 
   update(t) {
@@ -319,10 +348,39 @@ export const soapBubbleSky: SceneModule = {
       mesh.setMatrixAt(i, dummy.matrix);
 
       st[i * 3 + 1] = pop;
+
+      // しずくは穴の開いた側を中心に扇状に飛び、少し落ちながら小さくなって消える
+      const flying = pop > 0 && pop < 1;
+      const seed = phase;
+      const hx = Math.sin(seed * 40);
+      const hy = Math.cos(seed * 23);
+      const hz = Math.sin(seed * 17);
+      for (let d = 0; d < DROPS; d++) {
+        const j = i * DROPS + d;
+        if (!flying) {
+          dummy.scale.setScalar(0);
+        } else {
+          const ang = (d / DROPS) * Math.PI * 2 + seed * 13;
+          let dx = hx + 0.8 * Math.cos(ang);
+          let dy = hy + 0.8 * Math.sin(ang);
+          let dz = hz + 0.8 * Math.sin(ang * 1.7);
+          const len = Math.hypot(dx, dy, dz) || 1;
+          dx /= len;
+          dy /= len;
+          dz /= len;
+          const reach = r * (1 + (DROP_REACH - 1) * Math.sqrt(pop));
+          dummy.position.set(x + dx * reach, y + dy * reach - 1.2 * pop * pop, zz + dz * reach);
+          dummy.scale.setScalar(DROP_SIZE * (0.6 + r) * (1 - pop));
+        }
+        dummy.rotation.set(0, 0, 0);
+        dummy.updateMatrix();
+        drops.setMatrixAt(j, dummy.matrix);
+      }
       const k = Math.min(1, Math.max(0, (y - FADE_FROM) / (FADE_TO - FADE_FROM)));
       st[i * 3 + 2] = 0.15 + 0.85 * k * k * (3 - 2 * k);
     }
     mesh.instanceMatrix.needsUpdate = true;
+    drops.instanceMatrix.needsUpdate = true;
     state.needsUpdate = true;
   },
 
