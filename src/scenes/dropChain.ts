@@ -232,7 +232,7 @@ function sinceLand(b: Blob, u: number): number {
 export const dropChain: SceneModule = {
   name: 'Drop Chain',
   desc: '積み上がった 4 色の玉に最後の 1 組を落とすと、弾けては落ちてつながり、9 連鎖で盤が空になる。',
-  camera: { pos: [1.6, 6.6, 13.2], target: [0, 5.9, 0] },
+  camera: { pos: [2, 6.8, 16.5], target: [0, 6, 0] },
 
   build(root) {
     prevCycle = -1;
@@ -271,6 +271,8 @@ export const dropChain: SceneModule = {
       N,
     );
     balls.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    // 最初のフレームは全部隠れているので、そこで測った外接球で間引かれないようにする
+    balls.frustumCulled = false;
     root.add(balls);
 
     // 同じ色どうしの「くっつき」（隣の玉へ伸ばす短い胴）
@@ -278,6 +280,7 @@ export const dropChain: SceneModule = {
     brGeo.translate(0, CELL / 2, 0);
     bridges = new THREE.InstancedMesh(brGeo, new THREE.MeshStandardMaterial({ roughness: 0.22, metalness: 0.05 }), N * 2);
     bridges.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    bridges.frustumCulled = false;
     root.add(bridges);
 
     // 弾けたときの火の粉
@@ -287,11 +290,12 @@ export const dropChain: SceneModule = {
       N * SPARKS,
     );
     sparks.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    sparks.frustumCulled = false;
     root.add(sparks);
 
     // 連鎖の数を数える灯（盤の右の柱）
     const nLamp = Math.max(1, chainAt.length);
-    lamps = new THREE.InstancedMesh(new THREE.SphereGeometry(0.24, 16, 12), new THREE.MeshBasicMaterial(), nLamp);
+    lamps = new THREE.InstancedMesh(new THREE.SphereGeometry(0.2, 16, 12), new THREE.MeshBasicMaterial(), nLamp);
     const step = (H * CELL - 1.2) / nLamp;
     for (let k = 0; k < nLamp; k++) {
       dummy.position.set((W * CELL) / 2 + 0.62, 0.8 + k * step, 0.2);
