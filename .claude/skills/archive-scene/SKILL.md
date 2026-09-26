@@ -169,7 +169,7 @@ git status --porcelain
 
 <なぜいまいちだったか。ユーザーが言った言葉を残す>
 
-Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Co-Authored-By: <セッションに指示されている行をそのまま。モデル名を書き固めない>
 Claude-Session: <このセッションの URL>
 ```
 
