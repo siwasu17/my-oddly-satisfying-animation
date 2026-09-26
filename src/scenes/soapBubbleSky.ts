@@ -21,12 +21,12 @@ import { emberColor } from '../palette.ts';
 const COUNT = 44;
 /** 生まれる高さ（画面の下より少し下） */
 const BOTTOM = -11;
-/** この高さまで昇るあいだに、薄い姿から濃くなる（画面の下端の文字に玉が溜まらない） */
-const FADE_FROM = -1;
-const FADE_TO = 5;
-/** 弾ける高さの範囲 */
-const POP_MIN = 7;
-const POP_MAX = 21;
+/** この高さまで昇るあいだに、透明から濃くなる。丘の稜線より下では見えない（丘の向こうから昇ってくる） */
+const FADE_FROM = 3;
+const FADE_TO = 8;
+/** 弾ける高さの範囲。上限は画面上端のタブより下 */
+const POP_MIN = 8.5;
+const POP_MAX = 15.5;
 /** 昇る速さの範囲（毎秒） */
 const SPEED_MIN = 1.3;
 const SPEED_MAX = 2.1;
@@ -377,7 +377,7 @@ export const soapBubbleSky: SceneModule = {
         drops.setMatrixAt(j, dummy.matrix);
       }
       const k = Math.min(1, Math.max(0, (y - FADE_FROM) / (FADE_TO - FADE_FROM)));
-      st[i * 3 + 2] = 0.15 + 0.85 * k * k * (3 - 2 * k);
+      st[i * 3 + 2] = k * k * (3 - 2 * k);
     }
     mesh.instanceMatrix.needsUpdate = true;
     drops.instanceMatrix.needsUpdate = true;
