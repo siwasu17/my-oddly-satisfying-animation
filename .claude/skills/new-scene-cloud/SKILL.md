@@ -71,8 +71,8 @@ worktree の分岐元は通常版の Phase 2 どおりローカルの `main` に
 npm ci
 ```
 
-`npm install` は npm のバージョン差で `package-lock.json` を書き換えることがある
-（実際に `libc` 欄が消える差分が出た）。`npm ci` は lockfile を書き換えない。
+`npm install` は npm のバージョン差で `package-lock.json` を書き換えることがある。
+`npm ci` は lockfile を書き換えない。
 
 それでも `git status --porcelain` に `package-lock.json` が出たら、**コミットせずに戻す**。
 
