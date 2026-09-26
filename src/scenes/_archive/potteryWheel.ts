@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { SceneModule } from '../types.ts';
-import { tone, ticker } from '../audio.ts';
-import { SURFACE, ember, emberColor } from '../palette.ts';
+import type { SceneModule } from '../../types.ts';
+import { tone, ticker } from '../../audio.ts';
+import { SURFACE, ember, emberColor } from '../../palette.ts';
 
 /**
  * Pottery Wheel — ろくろの上で、粘土の塊が壺になり、また塊へ戻る。
