@@ -46,11 +46,13 @@ const FAN = 0.003;
 /** しなりの曲率（1/半径）。負で上に凸に反り、外側の端を支点に内側の端が山へ垂れる */
 const BEND = -0.085;
 /** 反らせた束を、落ちた山の上面からどれだけ浮かせるか。落ちる隙間を見せる */
-const HOVER = 1.4;
+const HOVER = 2.0;
 /** 長辺方向の分割数。曲げたときに折れ線に見えない程度 */
 const SEG = 24;
 /** 着地してから揺れが収まるまでの秒数と、揺れの大きさ（しなりに対する比） */
 const SETTLE = 0.4;
+/** 落ちている途中に内側へのめる角度。宙にいる 1 枚を「落ちている」と読ませる */
+const FLIP = 0.4;
 const WOBBLE = 0.45;
 /** 1 段上がるごとに外側へずらす幅。下のカードほど内側へ出て、垂れた縁が階段状にのぞく */
 const STAIR = 0.035;
@@ -257,7 +259,7 @@ export const riffleShuffle: SceneModule = {
           const fx = smooth(f);
           x = pose.x + (s * STAG - pose.x) * fx;
           y = pose.y + (ey - pose.y) * f * f;
-          a = pose.a * (1 - fx);
+          a = pose.a * (1 - fx) + s * FLIP * Math.sin(Math.PI * f);
           // 手を離れたしなりが戻る。支点も中心へ寄せて、着地の揺れにつなぐ
           k = pose.k * (1 - fx);
           b = pose.b * (1 - fx);
