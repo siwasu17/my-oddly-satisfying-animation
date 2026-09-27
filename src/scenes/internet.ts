@@ -36,13 +36,13 @@ const HUBS: [number, number, number][] = [
 /** 経路（ハブの組）。各組に行きと帰りの 2 本を流す */
 const LINKS: [number, number][] = [
   [0, 1], [0, 2], [0, 3], [0, 4], [0, 6],
-  [1, 5], [1, 6], [2, 6], [2, 4], [3, 5], [3, 4],
+  [1, 5], [2, 6], [3, 5],
 ];
 /** 音を鳴らす（大きな）ハブ */
 const LOUD_HUB = 0;
 
 /** 1 本の経路に流す粒子の数 */
-const PER_ROUTE = 900;
+const PER_ROUTE = 630;
 /** うち、塊にならず細く流れ続ける粒子の割合 */
 const TRICKLE = 0.3;
 /** 1 本の経路に同時に乗っているバーストの数 */
@@ -59,10 +59,10 @@ const BOW_UP = 0.16;
 const BOW_SIDE = 0.12;
 
 /** ハブの格（1 = 最大）。主役は 2〜3 個に絞り、残りは小さく暗くする */
-const HUB_SCALE = [1, 0.72, 0.66, 0.45, 0.42, 0.34, 0.4];
+const HUB_SCALE = [1, 0.86, 0.8, 0.48, 0.46, 0.38, 0.42];
 /** 格 1 のハブの粒子の数と半径（数は格の 2 乗、半径は格に比例） */
-const HUB_MAX = 4200;
-const HUB_RMAX = 2.4;
+const HUB_MAX = 5200;
+const HUB_RMAX = 2.6;
 /** 渦の腕の数と巻きの強さ、渦が回る速さ（rad/秒） */
 const ARMS = 2;
 const ARM_WIND = 1.6;
@@ -76,7 +76,7 @@ const CURL_SPEED = 0.18;
 /** 粒子の大きさ（ワールド単位）と明るさ */
 const ROUTE_SIZE = 0.075;
 const HUB_SIZE = 0.075;
-const ROUTE_GAIN = 0.34;
+const ROUTE_GAIN = 0.24;
 const HUB_GAIN = 0.13;
 /** バーストが届いたときにハブが明るむ量と、引く速さ（秒） */
 const ARRIVE_GLOW = 0.55;
@@ -225,7 +225,7 @@ function makeMaterial(vert: string, gain: number, withGlow: boolean): THREE.Shad
 export const internet: SceneModule = {
   name: 'Internet',
   desc: '粒子の渦になったハブのあいだを、トラフィックが煙のようにうねりながら流れて吸い込まれる。',
-  camera: { pos: [-1.2, 8.4, 17.5], target: [-1.2, 0.4, -0.6] },
+  camera: { pos: [-1.2, 8.0, 17.5], target: [-1.2, 0.0, -0.6] },
 
   build(root) {
     let s = 0.731;
@@ -324,7 +324,7 @@ export const internet: SceneModule = {
         hSph.set([az, el, r, 0.4 + rnd() * 0.8], i * 4);
         hHub[i] = h;
         // 白に近いのは中心のごく小さな範囲だけ。渦の腕は薔薇〜琥珀の中ほどに抑える
-        ember(color, q < 0.05 ? 0.92 : 0.42 + 0.22 * Math.sin(q * Math.PI), (rnd() - 0.5) * 0.04);
+        ember(color, q < 0.05 ? 0.92 : 0.58 + 0.2 * Math.sin(q * Math.PI), (rnd() - 0.5) * 0.04);
         color.multiplyScalar(dim);
         color.toArray(hCol, i * 3);
       }
