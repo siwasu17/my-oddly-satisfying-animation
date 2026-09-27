@@ -1,15 +1,16 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
 import { tone } from '../audio.ts';
-import { SURFACE, ember, drift } from '../palette.ts';
+import { SURFACE, ember, emberColor, drift } from '../palette.ts';
 
 /**
  * Drop Chain。
  *
  * 落ち物パズルの「連鎖」。縦長の盤へ、ぷるんとした 4 色の玉が 2 つずつ降ってきて積み上がる。
  * 最後の 1 組が落ちると、同じ色が 4 つつながったところから弾けて、上の玉が落ちて次がつながり、
- * また弾ける……を 9 回くり返して盤がまっさらになる。盤の右の灯が、連鎖の数だけ下から灯っていく。
- * 積み方は固定（探索で見つけた 9 連鎖・全消しの配置）なので、何度見ても同じ連鎖が起きる。
+ * また弾ける……をくり返して盤がまっさらになる。盤の右の灯が、連鎖の数だけ下から灯っていく。
+ * 積み方は 6 通り（探索で見つけた 5〜9 連鎖・全消しの配置）を順に回す。短い連鎖と長い連鎖、
+ * 端から崩れるものと真ん中から崩れるものが交互に来る。配置は固定なので、何周しても同じ順で同じ連鎖が起きる。
  * 音は玉が着地する小さな音と、連鎖ごとに一段ずつ上がっていく弾ける音。
  */
 
@@ -22,26 +23,61 @@ const BLOB_R = 0.47;
 const BRIDGE_R = 0.34;
 
 /**
- * 積んでおく玉（列ごとに下から）。0..3 は色。最後に TRIGGER_COL へ TRIGGER_COLOR の縦 2 つを落とす。
- * 同じ色が 4 つ以上つながったところは無い（落とすまで何も起きない）。
+ * 積み方の 1 通り。stack は列ごとに下から積む色（0..3）。最後に col へ color の縦 2 つを落とす。
+ * どれも積んだ時点では同じ色が 4 つ以上つながったところは無く（落とすまで何も起きない）、
+ * 連鎖が終わると盤に何も残らない。
  */
-const STACK: number[][] = [
-  [0, 0, 2, 0, 0, 1],
-  [1, 1, 2],
-  [1, 2, 0, 0, 0, 2, 2, 0, 3],
-  [3, 3, 1, 2, 3, 0, 3, 0, 0],
-  [1, 3, 1, 2, 0, 3],
-  [1, 0, 3],
+interface Layout {
+  stack: number[][];
+  col: number;
+  color: number;
+}
+/** この順に回す（コメントは連鎖数） */
+const LAYOUTS: Layout[] = [
+  // 9 連鎖。右端から火がつく
+  {
+    stack: [[0, 0, 2, 0, 0, 1], [1, 1, 2], [1, 2, 0, 0, 0, 2, 2, 0, 3], [3, 3, 1, 2, 3, 0, 3, 0, 0], [1, 3, 1, 2, 0, 3], [1, 0, 3]],
+    col: 5,
+    color: 2,
+  },
+  // 5 連鎖。小さく低い山
+  {
+    stack: [[3, 3, 2], [3, 2], [2, 1, 3, 3, 1, 3, 2, 2], [1, 1, 2, 3], [2, 2], [2]],
+    col: 1,
+    color: 3,
+  },
+  // 8 連鎖。真ん中から
+  {
+    stack: [[1], [2, 1, 3, 1, 0, 0, 0], [2, 2, 3, 1], [1, 1, 0, 0, 0, 3, 0, 0, 2], [0, 1, 3, 2, 1, 0, 1, 1], [2, 2, 0, 0, 0, 2, 0]],
+    col: 2,
+    color: 0,
+  },
+  // 6 連鎖。左が空いた盤
+  {
+    stack: [[], [2], [3, 1, 1, 1, 2], [1, 3, 0, 0, 1, 3, 2, 2, 1], [1, 3, 0], [1, 0, 1, 1, 0, 1]],
+    col: 4,
+    color: 1,
+  },
+  // 9 連鎖。空いた左端に落とす
+  {
+    stack: [[], [1, 1, 2, 3, 2, 2, 1, 0, 3], [1, 2, 3, 3, 0, 0, 1, 2, 3], [3, 3, 2, 1, 0, 2, 3, 1, 2], [1, 2, 3, 1, 1, 2, 2], [2, 1, 2]],
+    col: 0,
+    color: 1,
+  },
+  // 7 連鎖。右が空いた盤
+  {
+    stack: [[0], [0, 2, 1, 1, 2, 3, 0, 0], [1, 2, 2, 0, 3, 3, 2, 0, 1], [2, 0, 3, 2, 0, 2, 1], [0, 0, 1], []],
+    col: 0,
+    color: 1,
+  },
 ];
-const TRIGGER_COL = 5;
-const TRIGGER_COLOR = 2;
 
 /** 色ごとの [ember の n, 色相のずらし, 明度の持ち上げ]。暖色帯の中で明度と色相をできるだけ離す */
 const COLORS: [number, number, number][] = [
-  [0.0, -0.04, 0.17],
-  [0.4, 0.04, -0.05],
-  [0.68, -0.035, 0.03],
-  [0.94, 0.04, -0.09],
+  [0.0, -0.04, 0.06],
+  [0.33, -0.03, -0.02],
+  [0.7, -0.035, -0.05],
+  [1.0, 0.04, -0.06],
 ];
 
 // ---- 時間 --------------------------------------------------------------
@@ -89,11 +125,46 @@ interface Ev {
   x: number;
 }
 
+/** 積み方 1 通りぶんの台本 */
+interface Script {
+  blobs: Blob[];
+  events: Ev[];
+  /** 連鎖 k 段目が弾けた時刻 */
+  chainAt: number[];
+  period: number;
+  /** 全体の中でこの台本が始まる時刻 */
+  start: number;
+}
+let scripts: Script[] = [];
+let total = 20;
+/** 最長の台本の玉の数と連鎖数（インスタンスの数） */
+let maxBlobs = 0;
+let maxChain = 1;
+
+/** いま使っている台本（update と sound の頭で差し替える） */
 let blobs: Blob[] = [];
 let events: Ev[] = [];
-/** 連鎖 k 段目が弾けた時刻 */
 let chainAt: number[] = [];
 let period = 20;
+
+/** t から台本と、その台本の中の経過秒を引く。loop は何周目か */
+function pick(t: number): { si: number; u: number; loop: number } {
+  const loop = Math.floor(t / total);
+  const tt = t - loop * total;
+  let si = scripts.length - 1;
+  for (let i = 0; i < scripts.length; i++) {
+    if (tt < scripts[i].start + scripts[i].period) {
+      si = i;
+      break;
+    }
+  }
+  const sc = scripts[si];
+  blobs = sc.blobs;
+  events = sc.events;
+  chainAt = sc.chainAt;
+  period = sc.period;
+  return { si, u: tt - sc.start, loop };
+}
 
 let balls: THREE.InstancedMesh;
 let bridges: THREE.InstancedMesh;
@@ -141,10 +212,11 @@ function findGroups(cols: number[][]): number[][] {
 }
 
 /** 積む → 落とす → 連鎖、を最初から最後まで計算して、時刻つきの台本にする */
-function simulate(): void {
+function simulate(L: Layout): Script {
   blobs = [];
   events = [];
   chainAt = [];
+  const STACK = L.stack;
 
   // 積む順番: 下の段から。2 つずつ組にして同じ時刻に落とす
   const order: [number, number][] = [];
@@ -163,9 +235,9 @@ function simulate(): void {
 
   // 最後の 1 組（縦 2 つ）
   const trig = BUILD0 + Math.ceil(order.length / 2) * PAIR_GAP + TRIGGER_WAIT;
-  const h = STACK[TRIGGER_COL].length;
-  place(TRIGGER_COL, h, TRIGGER_COLOR, trig);
-  place(TRIGGER_COL, h + 1, TRIGGER_COLOR, trig);
+  const h = STACK[L.col].length;
+  place(L.col, h, L.color, trig);
+  place(L.col, h + 1, L.color, trig);
 
   let now = trig + fallDur(DROP_H) + SETTLE;
   for (let k = 0; k < 40; k++) {
@@ -204,8 +276,8 @@ function simulate(): void {
     }
     now = last + SETTLE;
   }
-  period = now + HOLD;
   events.sort((a, b) => a.t - b.t);
+  return { blobs, events, chainAt, period: now + HOLD, start: 0 };
 }
 
 /** 玉の段（マス単位）。落ちている途中は重力で加速する */
@@ -231,15 +303,25 @@ function sinceLand(b: Blob, u: number): number {
 
 export const dropChain: SceneModule = {
   name: 'Drop Chain',
-  desc: '積み上がった 4 色の玉に最後の 1 組を落とすと、弾けては落ちてつながり、9 連鎖で盤が空になる。',
-  camera: { pos: [2, 6.8, 16.5], target: [0, 6, 0] },
+  desc: '積み上がった 4 色の玉に最後の 1 組を落とすと、弾けては落ちてつながり、連鎖して盤が空になる。積み方は 6 通り。',
+  camera: { pos: [2.2, 6.4, 19], target: [0, 5.3, 0] },
 
   build(root) {
     prevCycle = -1;
     prevU = 0;
-    simulate();
+    scripts = LAYOUTS.map(simulate);
+    total = 0;
+    maxBlobs = 0;
+    maxChain = 1;
+    for (const sc of scripts) {
+      sc.start = total;
+      total += sc.period;
+      maxBlobs = Math.max(maxBlobs, sc.blobs.length);
+      maxChain = Math.max(maxChain, sc.chainAt.length);
+    }
+    pick(0);
 
-    const N = blobs.length;
+    const N = maxBlobs;
     const frame = new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.45, metalness: 0.6 });
 
     // 床
@@ -263,6 +345,17 @@ export const dropChain: SceneModule = {
     const sill = new THREE.Mesh(new THREE.BoxGeometry(W * CELL + 0.66, 0.2, 1.4), frame);
     sill.position.set(0, -0.1, 0);
     root.add(sill);
+
+    // 盤の縁取り（左右の壁と底の前の辺）。暗い部屋でも盤の輪郭が読めるように少しだけ明るくする
+    const trim = new THREE.MeshStandardMaterial({ color: emberColor(0.3, 0, -0.02), roughness: 0.5, metalness: 0.5 });
+    for (const side of [-1, 1]) {
+      const edge = new THREE.Mesh(new THREE.BoxGeometry(0.08, H * CELL + 0.3, 0.06), trim);
+      edge.position.set(side * ((W * CELL) / 2 + 0.11), (H * CELL) / 2, 0.72);
+      root.add(edge);
+    }
+    const base = new THREE.Mesh(new THREE.BoxGeometry(W * CELL + 0.66, 0.06, 0.06), trim);
+    base.position.set(0, 0, 0.72);
+    root.add(base);
 
     // 玉
     balls = new THREE.InstancedMesh(
@@ -293,37 +386,32 @@ export const dropChain: SceneModule = {
     sparks.frustumCulled = false;
     root.add(sparks);
 
-    // 連鎖の数を数える灯（盤の右の柱）
-    const nLamp = Math.max(1, chainAt.length);
-    lamps = new THREE.InstancedMesh(new THREE.SphereGeometry(0.2, 16, 12), new THREE.MeshBasicMaterial(), nLamp);
+    // 連鎖の数を数える灯（盤の右の縁に埋め込む）
+    const nLamp = maxChain;
+    lamps = new THREE.InstancedMesh(new THREE.SphereGeometry(0.13, 16, 12), new THREE.MeshBasicMaterial(), nLamp);
     const step = (H * CELL - 1.2) / nLamp;
     for (let k = 0; k < nLamp; k++) {
-      dummy.position.set((W * CELL) / 2 + 0.62, 0.8 + k * step, 0.2);
+      dummy.position.set((W * CELL) / 2 + 0.11, 0.8 + k * step, 0.78);
       dummy.rotation.set(0, 0, 0);
       dummy.scale.setScalar(1);
       dummy.updateMatrix();
       lamps.setMatrixAt(k, dummy.matrix);
     }
     root.add(lamps);
-    const post = new THREE.Mesh(new THREE.BoxGeometry(0.34, H * CELL, 0.34), frame);
-    post.position.set((W * CELL) / 2 + 0.62, (H * CELL) / 2, -0.12);
-    root.add(post);
   },
 
   update(t) {
-    const cycle = Math.floor(t / period);
-    const u = t - cycle * period;
+    const { u } = pick(t);
     const hue = drift(t);
-    const N = blobs.length;
+    // 台本ごとに玉の数が違うので、最長のぶんまで回して余りは隠す
+    const N = maxBlobs;
     grid.fill(-1);
 
     for (let i = 0; i < N; i++) {
       const b = blobs[i];
-      const [cn, cs, cg] = COLORS[b.color];
-      const x = worldX(b.col);
-      const p = (u - b.pop) / POP; // 弾けの進み具合（負 = まだ）
+      const p = b ? (u - b.pop) / POP : 1; // 弾けの進み具合（負 = まだ）
 
-      if (u < b.spawn || p >= 1) {
+      if (!b || u < b.spawn || p >= 1) {
         dummy.scale.setScalar(0);
         dummy.position.set(0, -10, 0);
         dummy.updateMatrix();
@@ -332,6 +420,8 @@ export const dropChain: SceneModule = {
         continue;
       }
 
+      const [cn, cs, cg] = COLORS[b.color];
+      const x = worldX(b.col);
       const row = rowAt(b, u);
       let sx = 1;
       let sy = 1;
@@ -352,9 +442,11 @@ export const dropChain: SceneModule = {
         sy = size - jig;
         glow = 0.25 * q;
       }
+      // 盤の上端をくぐるまでは見せない（盤の外で浮いて見えないように、縁から膨らんで入る）
+      const enter = Math.min(1, Math.max(0, H - 0.3 - row));
       dummy.position.set(x, worldY(row) - (1 - sy) * BLOB_R, 0);
       dummy.rotation.set(0, 0, 0);
-      dummy.scale.set(sx, sy, sx);
+      dummy.scale.set(sx * enter, sy * enter, sx * enter);
       dummy.updateMatrix();
       balls.setMatrixAt(i, dummy.matrix);
       ember(color, cn, hue + cs, cg + glow);
@@ -395,10 +487,10 @@ export const dropChain: SceneModule = {
     // 火の粉
     for (let i = 0; i < N; i++) {
       const b = blobs[i];
-      const s = u - b.pop - POP * 0.45;
+      const s = b ? u - b.pop - POP * 0.45 : -1;
       for (let j = 0; j < SPARKS; j++) {
         const k = i * SPARKS + j;
-        if (s < 0 || s > SPARK_LIFE) {
+        if (!b || s < 0 || s > SPARK_LIFE) {
           dummy.scale.setScalar(0);
           dummy.updateMatrix();
           sparks.setMatrixAt(k, dummy.matrix);
@@ -440,8 +532,8 @@ export const dropChain: SceneModule = {
   },
 
   sound(t, _dt, sfx) {
-    const cycle = Math.floor(t / period);
-    const u = t - cycle * period;
+    const { si, u, loop } = pick(t);
+    const cycle = loop * scripts.length + si;
     if (cycle === prevCycle && u > prevU) {
       let landed = -1;
       for (const e of events) {
