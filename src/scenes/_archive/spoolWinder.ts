@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { SceneModule } from '../types.ts';
-import { tone, ticker } from '../audio.ts';
-import { SURFACE, ember, emberColor } from '../palette.ts';
+import type { SceneModule } from '../../types.ts';
+import { tone, ticker } from '../../audio.ts';
+import { SURFACE, ember, emberColor } from '../../palette.ts';
 
 /**
  * Spool Winder — 糸巻きに糸が層になって巻き取られていく。

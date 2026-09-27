@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import type { SceneModule } from '../types.ts';
-import { tone, tickers } from '../audio.ts';
-import { emberColor } from '../palette.ts';
-import { addInk, celGradient, inkMaterial } from '../toon.ts';
+import type { SceneModule } from '../../types.ts';
+import { tone, tickers } from '../../audio.ts';
+import { emberColor } from '../../palette.ts';
+import { addInk, celGradient, inkMaterial } from '../../toon.ts';
 
 /**
  * Toon Bounce。

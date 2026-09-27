@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import type { SceneModule } from '../types.ts';
-import type { Sfx } from '../audio.ts';
-import { tone } from '../audio.ts';
-import { SURFACE, ember, drift } from '../palette.ts';
+import type { SceneModule } from '../../types.ts';
+import type { Sfx } from '../../audio.ts';
+import { tone } from '../../audio.ts';
+import { SURFACE, ember, drift } from '../../palette.ts';
 
 /**
  * Sorting Bars — 挿入ソートで、ばらばらの高さのバーが一本ずつ正しい位置へ収まっていく。
