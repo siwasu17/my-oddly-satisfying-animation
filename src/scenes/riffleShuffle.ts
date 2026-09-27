@@ -41,9 +41,9 @@ const LIFT = 1.1;
 /** 内側の端を持ち上げる角度（束のいちばん下のカード） */
 const TILT = 0.08;
 /** 1 段上がるごとに足す角度。上のカードほど大きく反って、内側の端が扇状に開く */
-const FAN = 0.018;
+const FAN = 0.014;
 /** 1 段上がるごとに内側へずらす幅。縁が階段状にのぞく */
-const STAIR = 0.035;
+const STAIR = 0.055;
 
 /** 1 回ぶんの時刻表（秒） */
 const CYCLE = 8;
@@ -149,7 +149,7 @@ function inHalf(c: number, u: number): void {
 export const riffleShuffle: SceneModule = {
   name: 'Riffle Shuffle',
   desc: '割った山から一枚ずつ交互に落として重ねる。縞にばらけた色は 5 回切ると元の順に戻る。',
-  camera: { pos: [0, 8.6, 10.2], target: [0, 1, 0] },
+  camera: { pos: [0, 7.6, 10.6], target: [0, 1, 0] },
 
   build(root) {
     landTick = ticker();
@@ -214,7 +214,7 @@ export const riffleShuffle: SceneModule = {
       dummy.updateMatrix();
       mesh.setMatrixAt(c, dummy.matrix);
 
-      ember(color, 0.08 + 0.84 * (1 - c / (N - 1)), hue);
+      ember(color, 0.2 + 0.76 * (1 - c / (N - 1)), hue);
       mesh.setColorAt(c, color);
     }
     mesh.instanceMatrix.needsUpdate = true;
