@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
-import { addInk, celGradient, inkMaterial } from '../toon.ts';
 import { tone, ticker } from '../audio.ts';
 import { SURFACE, ember, emberColor, drift } from '../palette.ts';
 
@@ -13,16 +12,10 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
  * 横へ大きく膨らんでから敵へ吸い込まれる。着弾は左から右へ連鎖し、編隊が一網打尽に弾ける。
  * 9 秒で一巡し、次の編隊がまた降りてくる。音はロックオンの短い爪弾き、発射の風切り、
  * 着弾ごとに上がっていく音階。
- *
- * 敵機と自機だけセル調（トゥーン）の陰影と黒い輪郭線にしてある。レーザー・照準・爆発は
- * 加算合成の光のまま残すので、「塗りの機体」と「光る弾」の役割が絵の上で分かれる。
  */
 
 // --- 調整する数値 ---------------------------------------------------------
 
-/** 機体のセルの段（0..255、暗い順）と輪郭線の太さ（ワールド単位） */
-const CEL_BANDS = [70, 150, 255];
-const INK_W = 0.05;
 /** 1 周の秒数 */
 const CYCLE = 9;
 /** 敵の数 = レーザーの本数 */
@@ -191,12 +184,13 @@ export const hermiteLaser: SceneModule = {
     const eg = new THREE.ConeGeometry(0.75, 1.5, 3);
     eg.rotateX(Math.PI / 2);
     eg.scale(1, 0.35, 1);
-    const gradientMap = celGradient(CEL_BANDS);
-    const ink = inkMaterial(INK_W);
-    enemies = new THREE.InstancedMesh(eg, new THREE.MeshToonMaterial({ gradientMap }), N);
+    enemies = new THREE.InstancedMesh(
+      eg,
+      new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0.6 }),
+      N,
+    );
     enemies.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     root.add(enemies);
-    addInk(enemies, ink);
 
     const glow = (): THREE.MeshBasicMaterial =>
       new THREE.MeshBasicMaterial({
@@ -253,15 +247,13 @@ export const hermiteLaser: SceneModule = {
 
     // 自機。前へ尖った円錐と薄い翼
     ship = new THREE.Group();
-    const hullMat = new THREE.MeshToonMaterial({ color: emberColor(0.62), gradientMap });
+    const hullMat = new THREE.MeshStandardMaterial({ color: emberColor(0.62), roughness: 0.3, metalness: 0.55 });
     const hull = new THREE.Mesh(new THREE.ConeGeometry(0.45, 1.8, 12), hullMat);
     hull.rotation.x = -Math.PI / 2;
     ship.add(hull);
-    addInk(hull, ink);
     const wing = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.08, 0.6), hullMat);
     wing.position.z = 0.45;
     ship.add(wing);
-    addInk(wing, ink);
     engine = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 8), glow());
     engine.position.z = 1.0;
     ship.add(engine);
