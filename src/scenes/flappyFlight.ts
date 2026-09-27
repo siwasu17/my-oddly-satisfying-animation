@@ -13,7 +13,8 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
  * 鳥の高さは物理を積み上げずに t から直接解いている。羽ばたきは等間隔（土管 1 本に 2 回）で、
  * 羽ばたきごとの初速を「次の羽ばたきで目標の高さに着く」ように決めるので、
  * 見た目は重力と羽ばたきだけで飛んでいるのに、絶対にぶつからない。
- * 隙間の高さは固定シードで 12 本ぶん決めてあり、18 秒で元に戻る。
+ * 隙間の高さは上下へ大きく振り（交互を基本に、ときどき同じ側が続く）、振る量だけを
+ * 固定シードで散らす。12 本ぶんで 18 秒、元に戻る。
  * 地面・丘・雲は速さを変えて流し、奥行きを出す。
  *
  * 音: 羽ばたきで短い風切り音、土管を抜けるたびに上がっていく音程で 1 音。
@@ -34,15 +35,19 @@ const G = 22;
 const ARC = (G * TAU * TAU) / 8;
 /** 隙間の高さのパターン数。T × PATTERN 秒でループ */
 const PATTERN = 12;
-/** 隙間の中心の基準の高さと、上下のばらつき */
+/** 隙間の中心の基準の高さと、基準から上下へ振る幅 */
 const GAP_MID = 5.6;
-const GAP_SPREAD = 1.5;
+const GAP_SPREAD = 2.6;
+/** 基準から最低でもこれだけ（GAP_SPREAD に対する割合）は離す。高低差をはっきりさせる */
+const GAP_MIN_OFFSET = 0.45;
+/** 1 本ずつ上に振るか下に振るか。交互を基本に、ときどき同じ側を続けて単調さを崩す */
+const GAP_SIDES = [1, -1, 1, 1, -1, -1, 1, -1, -1, 1, -1, 1];
 /** 隙間の開き */
-const GAP_OPEN = 4.8;
+const GAP_OPEN = 3.6;
 /** 鳥の x 位置 */
 const BIRD_X = -3;
 /** 鳥の半径 */
-const BIRD_R = 0.95;
+const BIRD_R = 0.5;
 /** 土管の太さ・縁の太さ・縁の厚み */
 const PIPE_R = 0.75;
 const CAP_R = 0.92;
@@ -123,12 +128,10 @@ export const flappyFlight: SceneModule = {
 
     let s = 0.417;
     const rnd = (): number => (s = (s * 9301 + 0.49297) % 1);
-    // 隣どうしの差が大きくなりすぎないように、前の高さから寄せて決める
-    let prev = GAP_MID;
+    // 上下どちらに振るかは GAP_SIDES で決め、振る量だけを乱数で散らす
     for (let i = 0; i < PATTERN; i++) {
-      const target = GAP_MID + (rnd() * 2 - 1) * GAP_SPREAD;
-      prev = THREE.MathUtils.clamp(prev * 0.35 + target * 0.65, GAP_MID - GAP_SPREAD, GAP_MID + GAP_SPREAD);
-      gaps[i] = prev;
+      const amount = GAP_MIN_OFFSET + (1 - GAP_MIN_OFFSET) * rnd();
+      gaps[i] = GAP_MID + GAP_SIDES[i % GAP_SIDES.length] * amount * GAP_SPREAD;
     }
 
     // 土管の胴（上下で 2 本ずつ）。原点を底面に置き、Y スケールで長さを決める
@@ -198,18 +201,13 @@ export const flappyFlight: SceneModule = {
     );
     bird.add(body);
 
-    const eyeWhite = new THREE.Mesh(
-      new THREE.SphereGeometry(BIRD_R * 0.34, 16, 12),
-      new THREE.MeshStandardMaterial({ color: emberColor(1, 0, 0.2), roughness: 0.3 }),
-    );
-    eyeWhite.position.set(BIRD_R * 0.5, BIRD_R * 0.38, BIRD_R * 0.55);
-    body.add(eyeWhite);
-    const pupil = new THREE.Mesh(
-      new THREE.SphereGeometry(BIRD_R * 0.14, 12, 8),
+    // 目は黒い点だけ。胴の表面に半分埋める
+    const eye = new THREE.Mesh(
+      new THREE.SphereGeometry(BIRD_R * 0.17, 12, 8),
       new THREE.MeshStandardMaterial({ color: 0x1a0c0a, roughness: 0.4 }),
     );
-    pupil.position.set(BIRD_R * 0.66, BIRD_R * 0.4, BIRD_R * 0.72);
-    body.add(pupil);
+    eye.position.set(0.55, 0.4, 0.73).normalize().multiplyScalar(BIRD_R * 0.96);
+    body.add(eye);
 
     const beak = new THREE.Mesh(
       new THREE.ConeGeometry(BIRD_R * 0.3, BIRD_R * 0.7, 16),
