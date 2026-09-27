@@ -56,13 +56,13 @@ const CAP_H = 0.45;
 const CEIL = 22;
 const GROUND_H = 0.8;
 /** 画面に出す範囲（この外では土管を細らせて消す） */
-const VIEW_L = -13;
-const VIEW_R = 12;
+const VIEW_L = -21;
+const VIEW_R = 20;
 const EDGE_FADE = 2.5;
 /** 同時に描く土管の本数 */
 const PIPES = 8;
 /** 地面の縞の枚数と間隔 */
-const STRIPES = 14;
+const STRIPES = 22;
 const STRIPE_GAP = 2;
 /** 丘と雲（奥の飾り）。流れる速さは SPEED に対する比 */
 const HILLS = 7;
@@ -325,7 +325,7 @@ export const flappyFlight: SceneModule = {
     for (let i = 0; i < CLOUDS; i++) {
       const x = mod(i * CLOUD_SPACING - t * SPEED * CLOUD_PARALLAX + cloudSpan / 2, cloudSpan) - cloudSpan / 2;
       const w = edge(x * 0.8);
-      const cy = 9.6 + ((i * 5) % 3) * 0.7;
+      const cy = 12.6 + ((i * 5) % 3) * 0.5;
       for (let p = 0; p < 3; p++) {
         const r = p === 1 ? 1.0 : 0.72;
         dummy.position.set(x + (p - 1) * 1.1, cy + (p === 1 ? 0.25 : 0), -10);
