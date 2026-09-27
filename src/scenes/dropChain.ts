@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
+import { addInk, celGradient, inkMaterial } from '../toon.ts';
 import { tone } from '../audio.ts';
 import { SURFACE, ember, emberColor, drift } from '../palette.ts';
 
@@ -12,7 +13,18 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
  * 積み方は 6 通り（探索で見つけた 5〜9 連鎖・全消しの配置）を順に回す。短い連鎖と長い連鎖、
  * 端から崩れるものと真ん中から崩れるものが交互に来る。配置は固定なので、何周しても同じ順で同じ連鎖が起きる。
  * 音は玉が着地する小さな音と、連鎖ごとに一段ずつ上がっていく弾ける音。
+ *
+ * 見た目はこのジャンルらしくセル調（トゥーン）にしてある。陰影は 3 段で、玉と盤には黒い輪郭線。
+ * くっついた玉は胴にも輪郭線が付くので、つながった塊が 1 つの外形として読める。
  */
+
+// ---- 見た目 --------------------------------------------------------------
+/** セルの段（0..255）。暗い順 */
+const CEL_BANDS = [80, 160, 255];
+/** 輪郭線の太さ（ワールド単位） */
+const INK_W = 0.06;
+/** 盤の背板の明るさ（ember の n）。黒い輪郭線が乗る「地」になるよう、床や壁より少しだけ明るくする */
+const BACK_TONE = 0.022;
 
 // ---- 盤 ----------------------------------------------------------------
 const W = 6;
@@ -168,6 +180,7 @@ function pick(t: number): { si: number; u: number; loop: number } {
 
 let balls: THREE.InstancedMesh;
 let bridges: THREE.InstancedMesh;
+let bridgeInk: THREE.InstancedMesh;
 let sparks: THREE.InstancedMesh;
 let lamps: THREE.InstancedMesh;
 
@@ -322,32 +335,40 @@ export const dropChain: SceneModule = {
     pick(0);
 
     const N = maxBlobs;
-    const frame = new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.45, metalness: 0.6 });
+    const gradientMap = celGradient(CEL_BANDS);
+    const ink = inkMaterial(INK_W);
+    const frame = new THREE.MeshToonMaterial({ color: SURFACE, gradientMap });
 
     // 床
     const floor = new THREE.Mesh(
       new THREE.CircleGeometry(6.5, 96),
-      new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.92, metalness: 0.1 }),
+      new THREE.MeshToonMaterial({ color: SURFACE, gradientMap }),
     );
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.02;
     root.add(floor);
 
     // 盤: 背板と左右の壁、底
-    const back = new THREE.Mesh(new THREE.BoxGeometry(W * CELL + 0.3, H * CELL + 0.3, 0.2), frame);
+    const back = new THREE.Mesh(
+      new THREE.BoxGeometry(W * CELL + 0.3, H * CELL + 0.3, 0.2),
+      new THREE.MeshToonMaterial({ color: emberColor(BACK_TONE), gradientMap }),
+    );
     back.position.set(0, (H * CELL) / 2, -0.62);
     root.add(back);
+    addInk(back, ink);
     for (const side of [-1, 1]) {
       const wall = new THREE.Mesh(new THREE.BoxGeometry(0.22, H * CELL + 0.3, 1.4), frame);
       wall.position.set(side * ((W * CELL) / 2 + 0.11), (H * CELL) / 2, 0);
       root.add(wall);
+      addInk(wall, ink);
     }
     const sill = new THREE.Mesh(new THREE.BoxGeometry(W * CELL + 0.66, 0.2, 1.4), frame);
     sill.position.set(0, -0.1, 0);
     root.add(sill);
+    addInk(sill, ink);
 
     // 盤の縁取り（左右の壁と底の前の辺）。暗い部屋でも盤の輪郭が読めるように少しだけ明るくする
-    const trim = new THREE.MeshStandardMaterial({ color: emberColor(0.3, 0, -0.02), roughness: 0.5, metalness: 0.5 });
+    const trim = new THREE.MeshToonMaterial({ color: emberColor(0.3, 0, -0.02), gradientMap });
     for (const side of [-1, 1]) {
       const edge = new THREE.Mesh(new THREE.BoxGeometry(0.08, H * CELL + 0.3, 0.06), trim);
       edge.position.set(side * ((W * CELL) / 2 + 0.11), (H * CELL) / 2, 0.72);
@@ -360,21 +381,23 @@ export const dropChain: SceneModule = {
     // 玉
     balls = new THREE.InstancedMesh(
       new THREE.SphereGeometry(BLOB_R, 32, 20),
-      new THREE.MeshStandardMaterial({ roughness: 0.22, metalness: 0.05 }),
+      new THREE.MeshToonMaterial({ gradientMap }),
       N,
     );
     balls.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     // 最初のフレームは全部隠れているので、そこで測った外接球で間引かれないようにする
     balls.frustumCulled = false;
     root.add(balls);
+    addInk(balls, ink);
 
     // 同じ色どうしの「くっつき」（隣の玉へ伸ばす短い胴）
     const brGeo = new THREE.CylinderGeometry(BLOB_R * BRIDGE_R, BLOB_R * BRIDGE_R, CELL, 16, 1, true);
     brGeo.translate(0, CELL / 2, 0);
-    bridges = new THREE.InstancedMesh(brGeo, new THREE.MeshStandardMaterial({ roughness: 0.22, metalness: 0.05 }), N * 2);
+    bridges = new THREE.InstancedMesh(brGeo, new THREE.MeshToonMaterial({ gradientMap }), N * 2);
     bridges.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     bridges.frustumCulled = false;
     root.add(bridges);
+    bridgeInk = addInk(bridges, ink) as THREE.InstancedMesh;
 
     // 弾けたときの火の粉
     sparks = new THREE.InstancedMesh(
@@ -483,6 +506,7 @@ export const dropChain: SceneModule = {
       }
     }
     bridges.count = nb;
+    bridgeInk.count = nb;
 
     // 火の粉
     for (let i = 0; i < N; i++) {

@@ -20,6 +20,7 @@ Three.js のループアニメーションを、複数の Claude Code セッシ�
 
 - `src/stage.ts`（レンダラ・カメラ・ライト・ブルーム）
 - `src/palette.ts`（暖色パレット）、`src/audio.ts`（効果音）、`src/ui.ts`（タブ・キー操作）
+- `src/toon.ts`（セル調の陰影と輪郭線）
 - `src/main.ts`、`src/types.ts`、`src/scenes/index.ts`
 - `index.html`、`package.json`、`vite.config.ts`、`tsconfig.json`
 - `README.md`、この `CLAUDE.md`、`docs/`、`templates/`、`scripts/`、`.github/`

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
+import { addInk, celGradient, inkMaterial } from '../toon.ts';
 import { tone, ticker } from '../audio.ts';
 import { SURFACE, ember, emberColor, drift } from '../palette.ts';
 
@@ -16,6 +17,10 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
  * 隙間の高さは上下へ大きく振り（交互を基本に、ときどき同じ側が続く）、振る量だけを
  * 固定シードで散らす。12 本ぶんで 18 秒、元に戻る。
  * 地面・丘・雲は速さを変えて流し、奥行きを出す。
+ *
+ * 見た目は元のゲームに寄せてセル調（トゥーン）にしてある。陰影は 3 段だけで、
+ * 鳥・土管・丘・雲・地面には黒い輪郭線を付ける。羽ばたきで鳥が伸び縮みするたび、
+ * 明暗の境目がパキッと動く。
  *
  * 音: 羽ばたきで短い風切り音、土管を抜けるたびに上がっていく音程で 1 音。
  * スコープ外: 衝突・ゲームオーバー、スコアの数字表示、タップ操作。
@@ -73,6 +78,11 @@ const CLOUD_SPACING = 13;
 const CLOUD_PARALLAX = 0.12;
 /** 土管を抜けたときに縁が灯っている時間 */
 const FLASH = 0.5;
+/** セルの段（0..255）。暗い順 */
+const CEL_BANDS = [70, 150, 255];
+/** 輪郭線の太さ（ワールド単位）。背景の飾りと、手前の主役 */
+const INK_W = 0.07;
+const INK_W_BIRD = 0.045;
 
 const dummy = new THREE.Object3D();
 const color = new THREE.Color();
@@ -126,6 +136,10 @@ export const flappyFlight: SceneModule = {
     passTick = ticker();
     passCount = 0;
 
+    const gradientMap = celGradient(CEL_BANDS);
+    const ink = inkMaterial(INK_W);
+    const inkBird = inkMaterial(INK_W_BIRD);
+
     let s = 0.417;
     const rnd = (): number => (s = (s * 9301 + 0.49297) % 1);
     // 上下どちらに振るかは GAP_SIDES で決め、振る量だけを乱数で散らす
@@ -139,34 +153,37 @@ export const flappyFlight: SceneModule = {
     pipeGeo.translate(0, 0.5, 0);
     pipeMesh = new THREE.InstancedMesh(
       pipeGeo,
-      new THREE.MeshStandardMaterial({ roughness: 0.75, metalness: 0.1, side: THREE.DoubleSide }),
+      new THREE.MeshToonMaterial({ gradientMap, side: THREE.DoubleSide }),
       PIPES * 2,
     );
     pipeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     root.add(pipeMesh);
+    addInk(pipeMesh, ink);
 
     const capGeo = new THREE.CylinderGeometry(CAP_R, CAP_R, CAP_H, 28);
     capMesh = new THREE.InstancedMesh(
       capGeo,
-      new THREE.MeshStandardMaterial({ roughness: 0.7, metalness: 0.1 }),
+      new THREE.MeshToonMaterial({ gradientMap }),
       PIPES * 2,
     );
     capMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     root.add(capMesh);
+    addInk(capMesh, ink);
 
     // 地面
     const ground = new THREE.Mesh(
       new THREE.BoxGeometry(VIEW_R - VIEW_L + 6, GROUND_H, 5),
-      new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.6, metalness: 0.2 }),
+      new THREE.MeshToonMaterial({ color: SURFACE, gradientMap }),
     );
     ground.position.set(0, -GROUND_H / 2, 0);
     root.add(ground);
+    addInk(ground, ink);
 
     // 地面の縞。これが流れることで「進んでいる」と分かる
     const stripeGeo = new THREE.BoxGeometry(0.42, 0.06, 5.02);
     stripeMesh = new THREE.InstancedMesh(
       stripeGeo,
-      new THREE.MeshStandardMaterial({ color: emberColor(0.05), roughness: 0.8 }),
+      new THREE.MeshToonMaterial({ color: emberColor(0.05), gradientMap }),
       STRIPES,
     );
     stripeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -176,20 +193,22 @@ export const flappyFlight: SceneModule = {
     const hillGeo = new THREE.SphereGeometry(1, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
     hillMesh = new THREE.InstancedMesh(
       hillGeo,
-      new THREE.MeshStandardMaterial({ color: emberColor(0.05, 0, -0.02), roughness: 0.9 }),
+      new THREE.MeshToonMaterial({ color: emberColor(0.05, 0, -0.02), gradientMap }),
       HILLS,
     );
     hillMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     root.add(hillMesh);
+    addInk(hillMesh, ink);
 
     // 雲（つぶした球）
     cloudMesh = new THREE.InstancedMesh(
       new THREE.SphereGeometry(1, 20, 12),
-      new THREE.MeshStandardMaterial({ color: emberColor(0.12), roughness: 1 }),
+      new THREE.MeshToonMaterial({ color: emberColor(0.12), gradientMap }),
       CLOUDS * 3,
     );
     cloudMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     root.add(cloudMesh);
+    addInk(cloudMesh, ink);
 
     // 鳥: 胴・目・くちばし・翼
     bird = new THREE.Group();
@@ -197,9 +216,10 @@ export const flappyFlight: SceneModule = {
 
     body = new THREE.Mesh(
       new THREE.SphereGeometry(BIRD_R, 32, 20),
-      new THREE.MeshStandardMaterial({ color: emberColor(1, 0, 0.12), roughness: 0.35 }),
+      new THREE.MeshToonMaterial({ color: emberColor(1, 0, 0.12), gradientMap }),
     );
     bird.add(body);
+    addInk(body, inkBird);
 
     // 目は黒い点だけ。胴の表面に半分埋める
     const eye = new THREE.Mesh(
@@ -211,11 +231,12 @@ export const flappyFlight: SceneModule = {
 
     const beak = new THREE.Mesh(
       new THREE.ConeGeometry(BIRD_R * 0.3, BIRD_R * 0.7, 16),
-      new THREE.MeshStandardMaterial({ color: emberColor(0.75, 0.03, 0.12), roughness: 0.4 }),
+      new THREE.MeshToonMaterial({ color: emberColor(0.75, 0.03, 0.12), gradientMap }),
     );
     beak.rotation.z = -Math.PI / 2;
     beak.position.set(BIRD_R * 1.08, -BIRD_R * 0.05, 0);
     body.add(beak);
+    addInk(beak, inkBird);
 
     // 翼は根元（胴の横）を軸に回すので、ピボットの子に置く
     wing = new THREE.Group();
@@ -223,11 +244,12 @@ export const flappyFlight: SceneModule = {
     body.add(wing);
     const wingMesh = new THREE.Mesh(
       new THREE.SphereGeometry(1, 20, 12),
-      new THREE.MeshStandardMaterial({ color: emberColor(0.85, 0.02, 0.2), roughness: 0.4 }),
+      new THREE.MeshToonMaterial({ color: emberColor(0.85, 0.02, 0.2), gradientMap }),
     );
     wingMesh.scale.set(BIRD_R * 0.62, BIRD_R * 0.14, BIRD_R * 0.36);
     wingMesh.position.set(-BIRD_R * 0.35, 0, 0);
     wing.add(wingMesh);
+    addInk(wingMesh, inkBird);
   },
 
   update(t) {

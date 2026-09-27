@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
+import { addInk, celGradient, inkMaterial } from '../toon.ts';
 import { tone, tickers } from '../audio.ts';
 import { ember, emberColor, drift } from '../palette.ts';
 
@@ -14,6 +15,8 @@ import { ember, emberColor, drift } from '../palette.ts';
  * アヒルは球と円錐だけで組んだ最小限のシルエット（体・頭・くちばし・尾）で、
  * 滑っている間は進行方向を向きながら、浮き沈みしつつ左右にゆれて樋の中を流される。
  * ゆれの強さ・速さ・位相は一匹ずつ変えてあるので、隣どうしが揃って動かない。
+ * アヒルだけセル調（トゥーン）の陰影と黒い輪郭線にして、ビニールのおもちゃらしく見せる。
+ * 樋と水面は透け感と映り込みが要るので、ふつうの材質のまま残してある。
  *
  * 列は 3 本 × 2 つで 6 つあり、12 秒のループの中を 2 秒おきに順ぐりに落ちていく。
  * 位置はすべて経過秒から作り直しているので、いつ開いても同じ流れになる。
@@ -21,6 +24,9 @@ import { ember, emberColor, drift } from '../palette.ts';
 
 /* ── 調整する数値 ───────────────────────────────────────── */
 
+/** アヒルのセルの段（0..255、暗い順）と輪郭線の太さ（ワールド単位） */
+const CEL_BANDS = [80, 165, 255];
+const INK_W = 0.05;
 /** アヒルが入口から着水するまで（秒）。ループの周期そのもの */
 const PERIOD = 12;
 /** コースの入口の高さ */
@@ -143,8 +149,8 @@ const splash = new Float32Array(TOTAL * 2);
 let pivot: THREE.Group;
 /** 体・頭・くちばし・尾。4 つとも同じ姿勢行列を共有する */
 let parts: THREE.InstancedMesh[] = [];
-let duckMat: THREE.MeshStandardMaterial;
-let beakMat: THREE.MeshStandardMaterial;
+let duckMat: THREE.MeshToonMaterial;
+let beakMat: THREE.MeshToonMaterial;
 let ringMesh: THREE.InstancedMesh;
 
 let ticks = tickers(TOTAL);
@@ -302,12 +308,15 @@ export const waterSlide: SceneModule = {
     }
 
     // おもちゃなので個体で色を変えず、材質 2 つで塗り分ける
-    duckMat = new THREE.MeshStandardMaterial({ roughness: 0.42, metalness: 0.06 });
-    beakMat = new THREE.MeshStandardMaterial({ roughness: 0.46, metalness: 0.06 });
+    const gradientMap = celGradient(CEL_BANDS);
+    const ink = inkMaterial(INK_W);
+    duckMat = new THREE.MeshToonMaterial({ gradientMap });
+    beakMat = new THREE.MeshToonMaterial({ gradientMap });
     parts = duckParts().map((geo, i) => {
       const mesh = new THREE.InstancedMesh(geo, i === 2 ? beakMat : duckMat, TOTAL);
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       pivot.add(mesh);
+      addInk(mesh, ink);
       return mesh;
     });
 
