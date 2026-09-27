@@ -63,8 +63,8 @@ const STRIPE_GAP = 2;
 const HILLS = 7;
 const HILL_SPACING = 7;
 const HILL_PARALLAX = 0.3;
-const CLOUDS = 5;
-const CLOUD_SPACING = 10;
+const CLOUDS = 3;
+const CLOUD_SPACING = 13;
 const CLOUD_PARALLAX = 0.12;
 /** 土管を抜けたときに縁が灯っている時間 */
 const FLASH = 0.5;
@@ -114,7 +114,7 @@ function edge(x: number): number {
 export const flappyFlight: SceneModule = {
   name: 'Flappy Flight',
   desc: '羽ばたきの放物線が、流れてくる土管の隙間をいつもぴったり抜けていく。',
-  camera: { pos: [-1, 6, 15.5], target: [-1, 5.4, 0] },
+  camera: { pos: [-1, 5.4, 17], target: [-1, 4.4, 0] },
 
   build(root) {
     flapTick = ticker();
