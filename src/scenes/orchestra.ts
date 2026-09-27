@@ -50,7 +50,7 @@ const NECK = 1.0;
 /** 中央から端まで反応が伝わる遅れ（秒 / ラジアン） */
 const RIPPLE = 0.13;
 /** 鳴ったあとの光と膨らみが引く速さ */
-const DECAY = 3.2;
+const DECAY = 2.2;
 
 /** 指揮棒の図形の大きさ（小節ごと。強弱の代わり） */
 const DYN = [0.7, 0.75, 0.85, 0.9, 1.0, 1.05, 1.2, 0.6];
@@ -441,7 +441,7 @@ export const orchestra: SceneModule = {
       part.scale.set(s, s, s);
       put(bell, i);
 
-      ember(color, 0.42 + 0.5 * e, hue, 0.32 * e);
+      ember(color, 0.5 + 0.42 * e, hue, 0.32 * e);
       coil.setColorAt(i, color);
       bell.setColorAt(i, color);
     }
