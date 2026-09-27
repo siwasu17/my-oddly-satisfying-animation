@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
+import { addInk, celGradient, inkMaterial } from '../toon.ts';
 import { tone, tickers } from '../audio.ts';
 import { SURFACE, ember, emberColor, drift } from '../palette.ts';
 
@@ -22,7 +23,17 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
  * 気持ちよさの芯は「着地でぷにっと潰れて戻る」反復と、コの字を折り返しながら
  * 下りていく見通しの良さ。落下は重力加速だけで決めてあるので、着地点は必ず
  * 次の段に乗る。
+ *
+ * 見た目はセル調（トゥーン）。陰影は 3 段で、クッション・ベルト・ローラー・箱に黒い輪郭線を付ける。
+ * クッションが着地で潰れるたび、明暗の境目がパキッと動いて「ぷにっ」が強調される。
+ * 床だけは光のたまりを残したいので、ふつうの材質のまま。
  */
+
+// ---- 見た目 ----
+/** セルの段（0..255、暗い順） */
+const CEL_BANDS = [75, 155, 255];
+/** 輪郭線の太さ（ワールド単位） */
+const INK_W = 0.06;
 
 // ---- ベルト 1 本ぶんの寸法 ----
 /** ローラー中心までの距離（ベルトの直線部の半分） */
@@ -281,6 +292,7 @@ function cushionGeometry(): THREE.BufferGeometry {
 
 /** 段を組むのに使う材質一式。3 段で使い回す。 */
 interface BeltMats {
+  ink: THREE.Material;
   frame: THREE.Material;
   core: THREE.Material;
   roller: THREE.Material;
@@ -303,13 +315,17 @@ function buildTier(tier: Tier, cleatGeo: THREE.BufferGeometry, mats: BeltMats): 
     mats.core,
   );
   g.add(core);
+  addInk(core, mats.ink);
 
-  // ローラー。面が粗いほど回転が読み取れる
-  const rollerGeo = new THREE.CylinderGeometry(ROLLER_R, ROLLER_R, BELT_W * 1.02, 14);
+  // ローラー。面が粗いほど回転が読み取れる。トゥーン材質には flatShading が無いので、
+  // 頂点を面ごとに分けて法線を立て直し、角ばった陰影にしておく
+  const rollerGeo = new THREE.CylinderGeometry(ROLLER_R, ROLLER_R, BELT_W * 1.02, 14).toNonIndexed();
+  rollerGeo.computeVertexNormals();
   for (const sx of [-1, 1]) {
     const r = new THREE.Mesh(rollerGeo, mats.roller);
     r.position.x = sx * BELT_HALF;
     g.add(r);
+    addInk(r, mats.ink);
     rollers.push(r);
   }
 
@@ -332,27 +348,26 @@ function buildTier(tier: Tier, cleatGeo: THREE.BufferGeometry, mats: BeltMats): 
 }
 
 /** 受け箱。底と 4 枚の壁。落ちたクッションはこの内側の暗がりへ沈む。 */
-function buildBox(): THREE.Group {
+function buildBox(gradientMap: THREE.Texture, ink: THREE.Material): THREE.Group {
   const g = new THREE.Group();
   // 落下先が読めないと「終点で箱へ落ちる」が伝わらないので、少し明るい木箱にする
-  const mat = new THREE.MeshStandardMaterial({
-    color: emberColor(0.3, 0, -0.01),
-    roughness: 0.6,
-    metalness: 0.3,
-  });
+  const mat = new THREE.MeshToonMaterial({ color: emberColor(0.3, 0, -0.01), gradientMap });
   const half = BOX_SIZE / 2;
 
   const floor = new THREE.Mesh(new THREE.BoxGeometry(BOX_SIZE, 0.2, BOX_SIZE), mat);
   floor.position.y = 0.1;
   g.add(floor);
+  addInk(floor, ink);
 
   for (const sign of [-1, 1]) {
     const side = new THREE.Mesh(new THREE.BoxGeometry(BOX_SIZE, BOX_H, 0.18), mat);
     side.position.set(0, BOX_H / 2, sign * half);
     g.add(side);
+    addInk(side, ink);
     const end = new THREE.Mesh(new THREE.BoxGeometry(0.18, BOX_H, BOX_SIZE), mat);
     end.position.set(sign * half, BOX_H / 2, 0);
     g.add(end);
+    addInk(end, ink);
   }
   g.position.set(BOX_X, 0, BOX_Z);
   return g;
@@ -381,43 +396,30 @@ export const fluffBelt: SceneModule = {
     const cleatGeo = new THREE.BoxGeometry(0.55, 0.09, BELT_W);
     cleatGeo.translate(0, 0.045, 0);
 
+    const gradientMap = celGradient(CEL_BANDS);
+    const ink = inkMaterial(INK_W);
     const mats: BeltMats = {
-      // フレームは暗く細く。目立たせるとクッションのシルエットを汚す
-      frame: new THREE.MeshStandardMaterial({
-        color: emberColor(0.08, 0, -0.02),
-        roughness: 0.6,
-        metalness: 0.6,
-      }),
-      core: new THREE.MeshStandardMaterial({
-        color: emberColor(0.16, 0, -0.02),
-        roughness: 0.92,
-        metalness: 0.2,
-      }),
-      roller: new THREE.MeshStandardMaterial({
-        color: emberColor(0.24, 0, -0.02),
-        roughness: 0.5,
-        metalness: 0.6,
-        flatShading: true,
-      }),
-      // 暗いベルト地とのコントラストで、流れる縞として読ませる
-      cleat: new THREE.MeshStandardMaterial({
-        color: emberColor(0.42, 0, 0.02),
-        roughness: 0.65,
-        metalness: 0.45,
-      }),
+      ink,
+      // フレームは暗く細く。目立たせるとクッションのシルエットを汚す（輪郭線も付けない）
+      frame: new THREE.MeshToonMaterial({ color: emberColor(0.08, 0, -0.02), gradientMap }),
+      core: new THREE.MeshToonMaterial({ color: emberColor(0.16, 0, -0.02), gradientMap }),
+      roller: new THREE.MeshToonMaterial({ color: emberColor(0.24, 0, -0.02), gradientMap }),
+      // 暗いベルト地とのコントラストで、流れる縞として読ませる。数が多いので輪郭線は付けない
+      cleat: new THREE.MeshToonMaterial({ color: emberColor(0.42, 0, 0.02), gradientMap }),
     };
 
     for (const tier of TIERS) root.add(buildTier(tier, cleatGeo, mats));
 
     cushions = new THREE.InstancedMesh(
       cushionGeometry(),
-      new THREE.MeshStandardMaterial({ roughness: 0.92, metalness: 0.04 }),
+      new THREE.MeshToonMaterial({ gradientMap }),
       COUNT,
     );
     cushions.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     root.add(cushions);
+    addInk(cushions, ink);
 
-    root.add(buildBox());
+    root.add(buildBox(gradientMap, ink));
 
     const floor = new THREE.Mesh(
       new THREE.CircleGeometry(30, 96),
