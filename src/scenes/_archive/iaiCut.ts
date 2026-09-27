@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import type { SceneModule } from '../types.ts';
-import { tone, tickers } from '../audio.ts';
-import { SURFACE, ember, emberColor, drift } from '../palette.ts';
+import type { SceneModule } from '../../types.ts';
+import { tone, tickers } from '../../audio.ts';
+import { SURFACE, ember, emberColor, drift } from '../../palette.ts';
 
 /*
  * Iai Cut — 時代劇の試し斬り。月夜の道場に巻藁が 5 本立ち、左から順に一閃ずつ
