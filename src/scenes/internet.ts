@@ -58,11 +58,11 @@ const LANE = 0.28;
 const BOW_UP = 0.16;
 const BOW_SIDE = 0.12;
 
-/** ハブ 1 つの粒子の数（接続数に比例して増やす） */
-const HUB_PER_LINK = 1500;
-/** ハブの半径 = HUB_R0 + 接続数 × HUB_R1 */
-const HUB_R0 = 0.7;
-const HUB_R1 = 0.42;
+/** ハブの格（1 = 最大）。主役は 2〜3 個に絞り、残りは小さく暗くする */
+const HUB_SCALE = [1, 0.72, 0.66, 0.45, 0.42, 0.34, 0.4];
+/** 格 1 のハブの粒子の数と半径（数は格の 2 乗、半径は格に比例） */
+const HUB_MAX = 4200;
+const HUB_RMAX = 2.4;
 /** 渦の腕の数と巻きの強さ、渦が回る速さ（rad/秒） */
 const ARMS = 2;
 const ARM_WIND = 1.6;
@@ -77,7 +77,7 @@ const CURL_SPEED = 0.18;
 const ROUTE_SIZE = 0.075;
 const HUB_SIZE = 0.075;
 const ROUTE_GAIN = 0.34;
-const HUB_GAIN = 0.2;
+const HUB_GAIN = 0.13;
 /** バーストが届いたときにハブが明るむ量と、引く速さ（秒） */
 const ARRIVE_GLOW = 0.55;
 const ARRIVE_DECAY = 2.2;
@@ -205,8 +205,6 @@ interface Route {
 let routes: Route[] = [];
 let ticks = tickers(1);
 
-const degree = HUBS.map((_, i) => LINKS.filter(([a, b]) => a === i || b === i).length);
-
 function makeMaterial(vert: string, gain: number, withGlow: boolean): THREE.ShaderMaterial {
   const uniforms: Record<string, THREE.IUniform> = {
     uTime,
@@ -304,7 +302,7 @@ export const internet: SceneModule = {
     root.add(new THREE.Points(routeGeo, makeMaterial(ROUTE_VERT, ROUTE_GAIN, false)));
 
     // ---- ハブの粒子
-    const counts = degree.map((d) => d * HUB_PER_LINK);
+    const counts = HUB_SCALE.map((k) => Math.round(HUB_MAX * k * k));
     const m = counts.reduce((x, y) => x + y, 0);
     const hCenter = new Float32Array(m * 3);
     const hSph = new Float32Array(m * 4);
@@ -312,7 +310,8 @@ export const internet: SceneModule = {
     const hCol = new Float32Array(m * 3);
     let i = 0;
     HUBS.forEach((c, h) => {
-      const R = HUB_R0 + degree[h] * HUB_R1;
+      const R = HUB_RMAX * HUB_SCALE[h];
+      const dim = 0.55 + 0.45 * HUB_SCALE[h];
       for (let k = 0; k < counts[h]; k++, i++) {
         hCenter.set(c, i * 3);
         // 平たい渦巻きの円盤。粒は腕に沿って寄せ、中心の芯は小さく抑える
@@ -324,7 +323,9 @@ export const internet: SceneModule = {
         const el = (rnd() + rnd() - 1) * 0.28 * (1 - q * 0.6);
         hSph.set([az, el, r, 0.4 + rnd() * 0.8], i * 4);
         hHub[i] = h;
-        ember(color, 0.62 + 0.25 * Math.sin(q * Math.PI), (rnd() - 0.5) * 0.04);
+        // 白に近いのは中心のごく小さな範囲だけ。渦の腕は薔薇〜琥珀の中ほどに抑える
+        ember(color, q < 0.05 ? 0.92 : 0.42 + 0.22 * Math.sin(q * Math.PI), (rnd() - 0.5) * 0.04);
+        color.multiplyScalar(dim);
         color.toArray(hCol, i * 3);
       }
     });
