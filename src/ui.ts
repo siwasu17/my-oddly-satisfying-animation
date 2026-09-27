@@ -25,12 +25,14 @@ export interface Ui {
 // 横スワイプでシーンを送るときのしきい値。
 // これらを超えなかった指の動きは、OrbitControls の視点回転にそのまま残る。
 
-/** 送りと判定する横方向の移動量（px） */
-const SWIPE_MIN_X = 56;
+/** 送りと判定する横方向の移動量（px）。画面幅の割合との大きいほうを使う */
+const SWIPE_MIN_X = 96;
+/** 送りと判定する横方向の移動量（画面幅に対する割合） */
+const SWIPE_MIN_X_RATIO = 0.25;
 /** 縦揺れに対して横がこれだけ勝っていること */
-const SWIPE_RATIO = 1.6;
+const SWIPE_RATIO = 2.2;
 /** ゆっくりした指の動きは回転なので、この時間を過ぎたら送らない（ms） */
-const SWIPE_MAX_MS = 600;
+const SWIPE_MAX_MS = 450;
 
 /** タブ列の端をぼかす幅（px）。まだ先があることを示すためだけのもの。 */
 const TAB_FADE_PX = 48;
@@ -136,7 +138,8 @@ export function createUi(scenes: readonly SceneModule[], handlers: UiHandlers): 
       }
       const dx = e.clientX - x0;
       const dy = e.clientY - y0;
-      if (Math.abs(dx) < SWIPE_MIN_X) return;
+      const minX = Math.max(SWIPE_MIN_X, surface.clientWidth * SWIPE_MIN_X_RATIO);
+      if (Math.abs(dx) < minX) return;
       if (Math.abs(dx) < Math.abs(dy) * SWIPE_RATIO) return;
       id = -1; // 1 回のスワイプで送るのは 1 枚だけ
       // 左へ払ったら次（タブの並びで右隣）のシーンへ
