@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
 import { tone, tickers } from '../audio.ts';
 import { emberColor } from '../palette.ts';
+import { addInk, celGradient, inkMaterial } from '../toon.ts';
 
 /**
  * Toon Bounce。
@@ -39,8 +40,6 @@ const SQUASH = 0.42;
 const STRETCH = 0.24;
 /** 輪郭線の太さ（ワールド単位） */
 const OUTLINE = 0.07;
-/** 輪郭線の色 */
-const INK = 0x1a0c0a;
 /** セルの段（0..255）。暗い順 */
 const BANDS = [25, 100, 255];
 /** ホリゾントの色（ember の n）。鞠より暗くして主役を立てる */
@@ -52,10 +51,7 @@ const STAGE_BACK = -6;
 const STAGE_BEND = 4;
 const STAGE_H = 30;
 
-const shell = new THREE.Vector3();
-
 let balls: THREE.Mesh[] = [];
-let inks: THREE.Mesh[] = [];
 let ticks = tickers(N);
 
 /** 鞠 i の位相（整数をまたぐ瞬間 = 床に触れた瞬間） */
@@ -68,16 +64,6 @@ function phase(i: number, t: number): number {
 function smooth(e0: number, e1: number, x: number): number {
   const u = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
   return u * u * (3 - 2 * u);
-}
-
-/** 3 段のセル陰影を作るグラデーション。Nearest で引くので段が混ざらない */
-function makeGradient(): THREE.DataTexture {
-  const tex = new THREE.DataTexture(new Uint8Array(BANDS), BANDS.length, 1, THREE.RedFormat);
-  tex.minFilter = THREE.NearestFilter;
-  tex.magFilter = THREE.NearestFilter;
-  tex.generateMipmaps = false;
-  tex.needsUpdate = true;
-  return tex;
 }
 
 /** 床（y = 0）が奥で 1/4 円を描いて壁へ立ち上がる面を、断面を x 方向へ引き伸ばして作る */
@@ -116,11 +102,10 @@ export const toonBounce: SceneModule = {
   build(root) {
     ticks = tickers(N);
     balls = [];
-    inks = [];
 
-    const gradient = makeGradient();
+    const gradient = celGradient(BANDS);
     const geo = new THREE.SphereGeometry(R, 48, 32);
-    const inkMat = new THREE.MeshBasicMaterial({ color: INK, side: THREE.BackSide });
+    const inkMat = inkMaterial(OUTLINE);
 
     for (let i = 0; i < N; i++) {
       const mat = new THREE.MeshToonMaterial({
@@ -131,11 +116,8 @@ export const toonBounce: SceneModule = {
       root.add(ball);
       balls.push(ball);
 
-      // 裏面だけを少し大きく描くと、表の縁から黒がはみ出して輪郭線になる
-      const ink = new THREE.Mesh(geo, inkMat);
-      ink.userData.shadow = false;
-      root.add(ink);
-      inks.push(ink);
+      // 輪郭線は鞠の子なので、潰れても伸びても付いてくる。太さは一定のまま
+      addInk(ball, inkMat);
     }
 
     // 床から奥の壁へ丸く立ち上がるホリゾント。セルの段が曲面の上で帯になり、
@@ -173,12 +155,6 @@ export const toonBounce: SceneModule = {
       ball.receiveShadow = false;
       ball.position.set((i - (N - 1) / 2) * GAP, y, 0);
       ball.scale.set(sxz, sy, sxz);
-
-      // 輪郭は軸ごとに一定の厚みだけ大きくする（潰れても線の太さが変わらない）
-      shell.set(sxz + OUTLINE / R, sy + OUTLINE / R, sxz + OUTLINE / R);
-      const ink = inks[i];
-      ink.position.copy(ball.position);
-      ink.scale.copy(shell);
     }
   },
 
