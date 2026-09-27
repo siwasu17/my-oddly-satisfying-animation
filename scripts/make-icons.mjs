@@ -47,71 +47,159 @@ function ember(n, glow = 0) {
 }
 
 // ---------------------------------------------------------------- 図案
-/** 内側ほど明るい同心円。Breathing Rings のシーンを 1 枚に畳んだ絵柄。 */
-const RINGS = [
-  { r: 0.22, n: 1.0 },
-  { r: 0.4, n: 0.8 },
-  { r: 0.58, n: 0.6 },
-  { r: 0.76, n: 0.42 },
-  { r: 0.94, n: 0.26 },
+/**
+ * 暗い水面の上に浮かぶ、内側から灯った琥珀色の球。
+ * 球の真下から楕円の波紋が広がり、水面には球の光が縦に伸びて映り込む。
+ * 「3D」「ループ」「就寝前」を 1 枚で言えて、小さく縮めても球の形だけは残る。
+ *
+ * 座標は -1..1 の正規化座標（y は下向き）。inset を掛けて全体を縮める。
+ */
+
+/** 背景。ほぼ黒だが、青みを消すためにわずかに暖色へ寄せている。 */
+const BG_EDGE = [0x08 / 255, 0x06 / 255, 0x07 / 255];
+const BG_CORE = [0x1a / 255, 0x0f / 255, 0x0d / 255];
+
+const ORB = { x: 0, y: -0.12, r: 0.44 };
+/** 水面の高さ（波紋の中心）と、楕円の縦横比。小さいほど水面を浅い角度で見る。 */
+const WATER_Y = 0.54;
+const FLAT = 0.28;
+/** 内側ほど明るく、太く、はっきりした波紋。 */
+const RIPPLES = [
+  { r: 0.3, n: 0.85, a: 0.95 },
+  { r: 0.55, n: 0.62, a: 0.6 },
+  { r: 0.8, n: 0.42, a: 0.34 },
 ];
 
-/** 背景。ほぼ黒だが、中心だけわずかに温度を持たせる。 */
-const BG_EDGE = [0x08 / 255, 0x06 / 255, 0x07 / 255];
-const BG_CORE = [0x18 / 255, 0x0e / 255, 0x0c / 255];
+const norm = (v) => {
+  const l = Math.hypot(...v);
+  return v.map((c) => c / l);
+};
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const smooth = (e0, e1, x) => {
+  const t = clamp01((x - e0) / (e1 - e0));
+  return t * t * (3 - 2 * t);
+};
+
+/** 左上手前からの光。球を「光る点」ではなく立体に見せるための向き。 */
+const LIGHT = norm([-0.55, -0.7, 0.6]);
+const HALF = norm([LIGHT[0], LIGHT[1], LIGHT[2] + 1]);
+
+const C_SPEC = ember(1, 0.3);
+const C_CORE = ember(1, 0.12);
+const C_HALO = ember(0.55, 0.05);
+const C_RIM = ember(0.15, 0.1);
+
+/** 1 点の色（0..1 の RGB、はみ出してよい）。s は inset。 */
+function shade(x, y, s) {
+  const d = Math.hypot(x, y);
+
+  // 背景: 中心から少しだけ下（水面の照り返し）に温度を持たせる
+  const bgT = clamp01(1 - Math.hypot(x, (y - 0.1) * 1.1) / 1.25) ** 2;
+  let c = BG_EDGE.map((e, i) => e + (BG_CORE[i] - e) * bgT);
+  const add = (col, k) => {
+    c[0] += col[0] * k;
+    c[1] += col[1] * k;
+    c[2] += col[2] * k;
+  };
+
+  const ox = ORB.x * s;
+  const oy = ORB.y * s;
+  const orr = ORB.r * s;
+  const wy = WATER_Y * s;
+
+  // ---- 水面（地平線より下だけ）
+  const horizon = wy - 0.34 * s;
+  const below = smooth(horizon, horizon + 0.12 * s, y);
+  if (below > 0) {
+    // 波紋: 楕円距離で測ると、上下が自然に細くなって奥行きが出る
+    const ed = Math.hypot(x, (y - wy) / FLAT);
+    for (const rp of RIPPLES) {
+      const e = (ed - rp.r * s) / (0.022 * s);
+      const glow = (ed - rp.r * s) / (0.09 * s);
+      // 手前（下半分）ほど明るい。奥は球の影に入って沈む
+      const front = 0.45 + 0.55 * smooth(-0.6, 0.6, (y - wy) / (rp.r * s * FLAT));
+      const k = rp.a * front * below * (Math.exp(-e * e) + 0.28 * Math.exp(-glow * glow));
+      add(ember(rp.n, 0.05), k);
+    }
+    // 球の映り込み: 縦に伸びた光の柱が、水面の揺れで横に少し滲む
+    const ry = (y - (wy - 0.04 * s)) / (0.42 * s);
+    const rx = x / (0.12 * s * (1 + 0.8 * Math.max(0, ry)));
+    const refl = Math.exp(-rx * rx) * Math.exp(-ry * ry * 1.6) * below;
+    add(C_HALO, 0.6 * refl);
+  }
+
+  // ---- 球
+  const px = (x - ox) / orr;
+  const py = (y - oy) / orr;
+  const q = px * px + py * py;
+
+  // 外側のにじみ（ブルームの代わり）
+  const out = Math.sqrt(q);
+  if (out > 0.9) {
+    const h = Math.max(0, out - 1);
+    add(C_HALO, 0.55 * Math.exp(-h * 3.2) * smooth(0.9, 1.0, out));
+  }
+
+  // 輪郭は 1.5px 程度の幅でなめらかに切る（呼び出し側でも超標本化している）
+  const edge = 1 - smooth(1 - 0.012 / s, 1 + 0.012 / s, out);
+  if (edge > 0) {
+    const nz = Math.sqrt(Math.max(0, 1 - q));
+    const n = [px, py, nz];
+    const diff = Math.max(0, dot(n, LIGHT));
+    // 内側から灯っているように、正面ほど明るい自己発光を足す
+    const glowIn = Math.pow(nz, 1.6);
+    const base = ember(0.3 + 0.45 * diff + 0.35 * glowIn, 0.02);
+    const spec = Math.pow(Math.max(0, dot(n, HALF)), 60);
+    // 下側の縁に水面からの照り返し
+    const rim = Math.pow(1 - nz, 2.5) * smooth(-0.2, 0.9, py);
+    const col = [0, 0, 0];
+    for (let i = 0; i < 3; i++) {
+      col[i] =
+        base[i] * (0.55 + 0.65 * diff) +
+        C_CORE[i] * 0.55 * glowIn * glowIn * glowIn +
+        C_SPEC[i] * 1.1 * spec +
+        C_RIM[i] * 1.4 * rim;
+    }
+    c = c.map((v, i) => v * (1 - edge) + col[i] * edge);
+  }
+
+  return c;
+}
+
+/** 強い光を白飛びさせず、なめらかに頭打ちさせる。 */
+const tone = (v) => (v < 0.75 ? v : 0.75 + 0.25 * (1 - Math.exp(-(v - 0.75) * 4)));
 
 /**
  * RGB の生ピクセルを返す。
  *
  * @param size  1 辺のピクセル数
- * @param inset リングが占める半径の割合。maskable では安全領域に収めるため小さくする。
+ * @param inset 図案が占める割合。maskable では安全領域に収めるため小さくする。
  */
 function render(size, inset) {
   const px = Buffer.alloc(size * size * 3);
   const half = size / 2;
-  // 半径方向のぼかし幅。解像度が変わっても見た目が揃うよう正規化座標で持つ。
-  const w = 0.055 * inset;
-
-  const rings = RINGS.map((ring) => ({
-    r: ring.r * inset,
-    color: ember(ring.n, 0.06),
-  }));
-
+  // 4x4 の超標本化で、球の輪郭と細い波紋のギザギザを消す
+  const SS = 4;
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      // ピクセル中心を使うと、円が半ピクセルずれずに済む
-      const dx = (x + 0.5 - half) / half;
-      const dy = (y + 0.5 - half) / half;
-      const d = Math.hypot(dx, dy);
-
-      const fade = clamp01(1 - d / 1.1);
-      const t = fade * fade;
-      let r = BG_EDGE[0] + (BG_CORE[0] - BG_EDGE[0]) * t;
-      let g = BG_EDGE[1] + (BG_CORE[1] - BG_EDGE[1]) * t;
-      let b = BG_EDGE[2] + (BG_CORE[2] - BG_EDGE[2]) * t;
-
-      for (const ring of rings) {
-        const e = (d - ring.r) / w;
-        const halo = (d - ring.r) / (w * 3.2);
-        // 細い芯 + 広いにじみ。輪郭を描かずに発光しているように見せる
-        const i = Math.exp(-e * e) + 0.32 * Math.exp(-halo * halo);
-        r += ring.color[0] * i;
-        g += ring.color[1] * i;
-        b += ring.color[2] * i;
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      for (let sy = 0; sy < SS; sy++) {
+        for (let sx = 0; sx < SS; sx++) {
+          const dx = (x + (sx + 0.5) / SS - half) / half;
+          const dy = (y + (sy + 0.5) / SS - half) / half;
+          const c = shade(dx, dy, inset);
+          r += c[0];
+          g += c[1];
+          b += c[2];
+        }
       }
-
-      // 中心の残り火
-      const c = d / (0.1 * inset);
-      const ci = 0.85 * Math.exp(-c * c);
-      const core = ember(1, 0.16);
-      r += core[0] * ci;
-      g += core[1] * ci;
-      b += core[2] * ci;
-
+      const k = 1 / (SS * SS);
       const o = (y * size + x) * 3;
-      px[o] = Math.round(clamp01(r) * 255);
-      px[o + 1] = Math.round(clamp01(g) * 255);
-      px[o + 2] = Math.round(clamp01(b) * 255);
+      px[o] = Math.round(clamp01(tone(r * k)) * 255);
+      px[o + 1] = Math.round(clamp01(tone(g * k)) * 255);
+      px[o + 2] = Math.round(clamp01(tone(b * k)) * 255);
     }
   }
   return px;
