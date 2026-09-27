@@ -1,6 +1,6 @@
 ---
 name: new-scene-cloud
-description: クラウドのセッション（Claude Code on the web）で、新しいループアニメーションを 1 本、人間の確認を挟まずに作り、main にはマージせず GitHub に PR を出して終える。撮影は agent-browser ではなく Playwright（scripts/shot-pw.mjs）で行う。/new-scene-cloud と呼ばれたとき、またはクラウドで「PR まで作って」「PR を出して完了に」と明示されたときだけ使う。ローカルで main まで入れたいときは new-scene-auto、確認を挟みたいときは new-scene を使うこと。
+description: クラウドのセッション（Claude Code on the web）で、新しいループアニメーションを 1 本、人間の確認を挟まずに作り、main にはマージせず GitHub に PR を出して終える。撮影は Playwright（scripts/shot-pw.mjs）で行う。/new-scene-cloud と呼ばれたとき、またはクラウドで「PR まで作って」「PR を出して完了に」と明示されたときだけ使う。ローカルで main まで入れたいときは new-scene-auto、確認を挟みたいときは new-scene を使うこと。
 argument-hint: "[scene-name] [シーンのコンセプト]"
 user-invocable: true
 ---
@@ -17,7 +17,7 @@ user-invocable: true
 
 - **終わり方**: ローカルの `main` へマージせず、**GitHub に PR を出して終える**。
   クラウドのコンテナは使い捨てで、ローカルの `main` に入れても残らないため。
-- **撮影**: `agent-browser` が無い前提で、**`scripts/shot-pw.mjs`（Playwright）で撮る**。
+- **撮影**: **`scripts/shot-pw.mjs`（Playwright）で撮る**。
 
 人間の確認を挟まないこと、機械で検証できるゲートを削らないことは `/new-scene-auto` と同じ。
 
@@ -41,7 +41,7 @@ user-invocable: true
 | 1〜3 | 名前 / worktree / 仕様は自分で決める | 同じ |
 | 4 | `npm install` | **`npm ci`**（lockfile を書き換えない） |
 | 5 | 共有ファイルは触らない | 同じ |
-| 6 | `npm run shot` + 講評 | **`node scripts/shot-pw.mjs`** + 講評。**agent-browser を探さない** |
+| 6 | `npm run shot` + 講評 | **`node scripts/shot-pw.mjs`** + 講評 |
 | 7 | コミット | 同じ |
 | 8.5 | ゲート 8 項目 | 5 番だけ差し替え（下記） |
 | 9 | `npm run merge-scene` | **push し、プレビューを Artifact に公開して PR を作る。マージしない** |
@@ -84,7 +84,7 @@ git restore package-lock.json
 
 ## Phase 6 の差分 — `shot-pw.mjs` で撮る
 
-**`npm run shot` を呼ばない。`agent-browser` の有無も確かめない。** クラウドには入っていない。
+**`npm run shot` を呼ばない。**
 代わりにこれを使う:
 
 ```bash
