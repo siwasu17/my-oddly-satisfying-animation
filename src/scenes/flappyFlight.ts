@@ -139,7 +139,7 @@ export const flappyFlight: SceneModule = {
     pipeGeo.translate(0, 0.5, 0);
     pipeMesh = new THREE.InstancedMesh(
       pipeGeo,
-      new THREE.MeshStandardMaterial({ roughness: 0.42, metalness: 0.35, side: THREE.DoubleSide }),
+      new THREE.MeshStandardMaterial({ roughness: 0.75, metalness: 0.1, side: THREE.DoubleSide }),
       PIPES * 2,
     );
     pipeMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -148,7 +148,7 @@ export const flappyFlight: SceneModule = {
     const capGeo = new THREE.CylinderGeometry(CAP_R, CAP_R, CAP_H, 28);
     capMesh = new THREE.InstancedMesh(
       capGeo,
-      new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0.4 }),
+      new THREE.MeshStandardMaterial({ roughness: 0.7, metalness: 0.1 }),
       PIPES * 2,
     );
     capMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -325,7 +325,7 @@ export const flappyFlight: SceneModule = {
     for (let i = 0; i < CLOUDS; i++) {
       const x = mod(i * CLOUD_SPACING - t * SPEED * CLOUD_PARALLAX + cloudSpan / 2, cloudSpan) - cloudSpan / 2;
       const w = edge(x * 0.8);
-      const cy = 12.6 + ((i * 5) % 3) * 0.5;
+      const cy = 12.0 + ((i * 5) % 3) * 0.4;
       for (let p = 0; p < 3; p++) {
         const r = p === 1 ? 1.0 : 0.72;
         dummy.position.set(x + (p - 1) * 1.1, cy + (p === 1 ? 0.25 : 0), -10);
