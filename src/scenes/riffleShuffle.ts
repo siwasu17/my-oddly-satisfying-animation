@@ -214,7 +214,7 @@ export const riffleShuffle: SceneModule = {
       dummy.updateMatrix();
       mesh.setMatrixAt(c, dummy.matrix);
 
-      ember(color, 0.2 + 0.76 * (1 - c / (N - 1)), hue);
+      ember(color, 0.2 + 0.6 * (1 - c / (N - 1)), hue);
       mesh.setColorAt(c, color);
     }
     mesh.instanceMatrix.needsUpdate = true;
