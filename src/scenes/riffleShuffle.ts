@@ -6,17 +6,18 @@ import { SURFACE, ember, drift } from '../palette.ts';
 /**
  * Riffle Shuffle。
  *
- * 32 枚のカードの山を半分に割り、左右の山の内側の端を持ち上げて、下から一枚ずつ
- * 交互に落として一つに重ねる（パーフェクト・アウトシャッフル）。最後に左右から
+ * 32 枚のカードの山を半分に割り、左右の山の内側の端を親指で弓なりに反らせて、
+ * 下から一枚ずつ交互に落として一つに重ねる（パーフェクト・アウトシャッフル）。
+ * 手を離れたカードは、しなりを戻しながら落ちて、着地でぷるっと揺れて平らになる。最後に左右から
  * 寄せて揃える。カードは元の並び順で薄紅〜琥珀のグラデーションに塗ってあり、
  * 切るたびに縞模様へばらけて、5 回目でまた元のグラデーションに戻る。
  *
- * 何が動くか:     カードの山。割る → 持ち上げる → 交互に落とす → 寄せて揃える
- * 気持ちよさの芯: 左右から一枚ずつ差し込まれるテンポと、縞が 5 回で元の順に戻ること
+ * 何が動くか:     カードの山。割る → 反らせる → 交互に落とす → 寄せて揃える
+ * 気持ちよさの芯: 反ったカードが一枚ずつ弾けて平らに戻るテンポと、縞が 5 回で元の順に戻ること
  * ループの周期:   1 回 8 秒。32 枚のアウトシャッフルは 5 回で元に戻るので 40 秒で一巡
  * カメラ:         斜め上の正面。落ちる点と山の側面の縞が両方見える角度
  * 音:             カードが落ちるたびに左右交互の短い pluck、割るときに air、揃えたときに drop
- * スコープ外:     カードのしなり（曲面）、ブリッジ、絵柄
+ * スコープ外:     ブリッジ、絵柄
  */
 
 /** 枚数。アウトシャッフルが 5 回で元に戻る枚数にしてある */
@@ -39,9 +40,16 @@ const STAG = 0.45;
 /** 上半分を持ち上げて運ぶときの弧の高さ */
 const LIFT = 1.1;
 /** 内側の端を持ち上げる角度（束のいちばん下のカード） */
-const TILT = 0.08;
-/** 1 段上がるごとに足す角度。上のカードほど大きく反って、内側の端が扇状に開く */
-const FAN = 0.014;
+const TILT = 0.03;
+/** 1 段上がるごとに足す角度。上のカードほど大きく傾いて、内側の端が扇状に開く */
+const FAN = 0.009;
+/** しなりの曲率（1/半径）。外側の端を支点に、内側の端が弓なりに持ち上がる */
+const BEND = 0.14;
+/** 長辺方向の分割数。曲げたときに折れ線に見えない程度 */
+const SEG = 24;
+/** 着地してから揺れが収まるまでの秒数と、揺れの大きさ（しなりに対する比） */
+const SETTLE = 0.4;
+const WOBBLE = 0.45;
 /** 1 段上がるごとに内側へずらす幅。縁が階段状にのぞく */
 const STAIR = 0.055;
 
@@ -61,6 +69,13 @@ const dummy = new THREE.Object3D();
 const color = new THREE.Color();
 
 let mesh: THREE.InstancedMesh;
+/** カードごとの [曲率, 支点の x（カードの中心から）]。頂点シェーダで曲げる */
+let bend: THREE.InstancedBufferAttribute;
+
+/** 支点 aBend.y を中心に、長辺（x）を曲率 aBend.x の円弧へ巻きつける */
+const BEND_GLSL = /* glsl */ `
+attribute vec2 aBend;
+`;
 
 /** 音の拍を数える。build のたびに作り直す */
 let landTick = ticker();
@@ -117,7 +132,7 @@ function released(u: number, s = 0): number {
   return n;
 }
 
-const pose = { x: 0, y: 0, a: 0 };
+const pose = { x: 0, y: 0, a: 0, k: 0, b: 0 };
 
 /** 割った山の中にいるカード c の、時刻 u での姿勢を pose に書く */
 function inHalf(c: number, u: number): void {
@@ -143,6 +158,8 @@ function inHalf(c: number, u: number): void {
   pose.x = px + dx * ca - dy * sa;
   pose.y = base + dx * sa + dy * ca;
   pose.a = a;
+  pose.k = BEND * st;
+  pose.b = s * (CL / 2);
 }
 
 /** 32 枚の山を割って交互に落とし、寄せて揃える。5 回で元の並びに戻る。 */
@@ -158,8 +175,41 @@ export const riffleShuffle: SceneModule = {
     landed = 0;
     prepared = -1;
 
-    const geo = new THREE.BoxGeometry(CL, TH * GAP, CW);
+    const geo = new THREE.BoxGeometry(CL, TH * GAP, CW, SEG, 1, 1);
+    bend = new THREE.InstancedBufferAttribute(new Float32Array(N * 2), 2);
+    bend.setUsage(THREE.DynamicDrawUsage);
+    geo.setAttribute('aBend', bend);
+
     const mat = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0.15 });
+    mat.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', `#include <common>\n${BEND_GLSL}`)
+        .replace(
+          '#include <beginnormal_vertex>',
+          /* glsl */ `
+          #include <beginnormal_vertex>
+          float bTh = (position.x - aBend.y) * aBend.x;
+          float bC = cos(bTh);
+          float bS = sin(bTh);
+          objectNormal = vec3(
+            objectNormal.x * bC - objectNormal.y * bS,
+            objectNormal.x * bS + objectNormal.y * bC,
+            objectNormal.z
+          );
+          `,
+        )
+        .replace(
+          '#include <begin_vertex>',
+          /* glsl */ `
+          #include <begin_vertex>
+          if (abs(aBend.x) > 1e-4) {
+            float bR = 1.0 / aBend.x;
+            transformed.x = aBend.y + (bR - position.y) * bS;
+            transformed.y = bR - (bR - position.y) * bC;
+          }
+          `,
+        );
+    };
     mesh = new THREE.InstancedMesh(geo, mat, N);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     root.add(mesh);
@@ -187,11 +237,15 @@ export const riffleShuffle: SceneModule = {
       let x: number;
       let y: number;
       let a: number;
+      let k = 0;
+      let b = 0;
       if (u < tr[c]) {
         inHalf(c, u);
         x = pose.x;
         y = pose.y;
         a = pose.a;
+        k = pose.k;
+        b = pose.b;
       } else {
         const ey = (N - 1 - p1[c]) * TH;
         const f = (u - tr[c]) / FALL;
@@ -202,10 +256,19 @@ export const riffleShuffle: SceneModule = {
           x = pose.x + (s * STAG - pose.x) * fx;
           y = pose.y + (ey - pose.y) * f * f;
           a = pose.a * (1 - fx);
+          // 手を離れたしなりが戻る。支点も中心へ寄せて、着地の揺れにつなぐ
+          k = pose.k * (1 - fx);
+          b = pose.b * (1 - fx);
         } else {
           x = s * STAG * (1 - sq);
           y = ey;
           a = 0;
+          // 着地の反動で、両端がぷるっと上下して収まる
+          const g = (u - tr[c] - FALL) / SETTLE;
+          if (g < 1) {
+            const e = 1 - g;
+            k = -BEND * WOBBLE * Math.sin(g * Math.PI * 3) * e * e;
+          }
         }
       }
 
@@ -213,11 +276,13 @@ export const riffleShuffle: SceneModule = {
       dummy.rotation.set(0, 0, a);
       dummy.updateMatrix();
       mesh.setMatrixAt(c, dummy.matrix);
+      bend.setXY(c, k, b);
 
       ember(color, 0.2 + 0.6 * (1 - c / (N - 1)), hue);
       mesh.setColorAt(c, color);
     }
     mesh.instanceMatrix.needsUpdate = true;
+    bend.needsUpdate = true;
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
   },
 
