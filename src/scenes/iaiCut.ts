@@ -23,8 +23,10 @@ const CUT_C = 2.9;               // 切り口（軸上）の高さ
 const CUT_ANGLE = 0.56;          // 切り口の傾き（ラジアン）。右上から左下への袈裟斬り
 const BINDINGS = [0.7, 1.9, 3.75]; // 藁を縛る紐の高さ
 const STRAW_N = 0.86;            // 藁の色（ember の n）
-const STRAW_GRAIN = 0.16;        // 繊維の明暗の幅
+const STRAW_GRAIN = 0.26;        // 繊維の明暗の幅
 const FACE_RINGS = 6;            // 切り口に見える巻きの輪の数
+const SIDE_COLS = 160;           // 側面の分割。繊維のまだらの細かさ
+const SIDE_ROWS = 48;
 
 const PERIOD = 10;               // 一巡の秒数
 const T_FIRST = 1.2;             // 最初の一閃
@@ -50,7 +52,7 @@ const MOON_R = 2.0;
 const MOON_N = 0.66;
 const FLOOR_METAL = 0.35;        // 床の照り返し。上げるとリムライトが大きく滲む
 
-const CAMERA_POS: [number, number, number] = [0, 3.3, 11.2];
+const CAMERA_POS: [number, number, number] = [0.1, 3.5, 12.9];
 const CAMERA_TARGET: [number, number, number] = [-0.7, 2.0, 0];
 // ---------------------------------------------------------------------------
 
@@ -74,7 +76,7 @@ function grain(a: number, b: number): number {
  * 下半分は上端を、上半分は下端を切り口の面（y = CUT_C + K x）へ寄せる。
  */
 function strawPiece(upper: boolean): THREE.BufferGeometry {
-  const geo = new THREE.CylinderGeometry(R, R, H, 96, 16);
+  const geo = new THREE.CylinderGeometry(R, R, H, SIDE_COLS, SIDE_ROWS);
   geo.translate(0, H / 2, 0);
   const pos = geo.getAttribute('position');
   const uv = geo.getAttribute('uv');
@@ -87,7 +89,7 @@ function strawPiece(upper: boolean): THREE.BufferGeometry {
     const cut = CUT_C + K * x;
     pos.setY(v, upper ? cut + frac * (H - cut) : frac * cut);
 
-    const g = grain(uv.getX(v) * 96, frac * 16 + (upper ? 7 : 0));
+    const g = grain(uv.getX(v) * SIDE_COLS, frac * SIDE_ROWS + (upper ? 7 : 0));
     ember(c, STRAW_N + (g - 0.5) * STRAW_GRAIN, -0.01);
     colors[v * 3] = c.r;
     colors[v * 3 + 1] = c.g;
@@ -101,21 +103,21 @@ function strawPiece(upper: boolean): THREE.BufferGeometry {
 
 /**
  * 切り口の面。巻いた畳表の断面に見えるよう、同心の輪で明暗をつける。
- * 切り口の中心が原点。上半分の面は下を向く。
+ * 中心が原点。down なら下を向き、slope は x 方向の傾き（天辺の面は 0）。
  */
-function cutFace(upper: boolean): THREE.BufferGeometry {
+function cutFace(down: boolean, slope = K): THREE.BufferGeometry {
   const geo = new THREE.RingGeometry(0, R * 0.995, 72, 14);
-  geo.rotateX(upper ? Math.PI / 2 : -Math.PI / 2);
+  geo.rotateX(down ? Math.PI / 2 : -Math.PI / 2);
   const pos = geo.getAttribute('position');
   const colors = new Float32Array(pos.count * 3);
   const c = new THREE.Color();
   for (let v = 0; v < pos.count; v++) {
     const x = pos.getX(v);
     const z = pos.getZ(v);
-    pos.setY(v, K * x + (upper ? -0.006 : 0.006));
+    pos.setY(v, slope * x + (down ? -0.006 : 0.006));
     const r = Math.hypot(x, z) / R;
     const ring = 0.5 + 0.5 * Math.sin(r * Math.PI * 2 * FACE_RINGS);
-    ember(c, 0.72 + ring * 0.14 + (grain(x * 40, z * 40) - 0.5) * 0.06, 0, 0.02);
+    ember(c, 0.7 + ring * 0.12 + (1 - r) * 0.1 + (grain(x * 60, z * 60) - 0.5) * 0.14, 0, 0.02);
     colors[v * 3] = c.r;
     colors[v * 3 + 1] = c.g;
     colors[v * 3 + 2] = c.b;
@@ -179,6 +181,7 @@ export const iaiCut: SceneModule = {
     const upper = strawPiece(true);
     const lowerFace = cutFace(false);
     const upperFace = cutFace(true);
+    const endFace = cutFace(false, 0);   // 天辺に見える束の断面
     const slashGeo = new THREE.PlaneGeometry(1, 1);
     slashGeo.translate(-0.5, 0, 0);   // 右端が原点。scale.x で左下へ伸びる
 
@@ -197,6 +200,7 @@ export const iaiCut: SceneModule = {
       const topMesh = new THREE.Mesh(upper, strawMat);
       top.add(topMesh);
       top.add(new THREE.Mesh(upperFace, strawMat));
+      top.add(new THREE.Mesh(endFace, strawMat).translateY(H - CUT_C));
 
       for (const h of BINDINGS) {
         const ring = new THREE.Mesh(bindGeo, bindMat);
