@@ -6,7 +6,7 @@ import { SURFACE, ember, emberColor, drift } from '../palette.ts';
 /**
  * Mission Impossible。天井から吊るされて金庫室へ降りる、あの場面。
  *
- * 天井の蓋が開き、ワイヤーに吊られた人影が降りてくる。途中には赤いレーザーが 3 段、
+ * 天井の蓋が開き、背中をワイヤーで吊られた人影がスカイダイビングのようにうつ伏せの水平姿勢で降りてくる。途中には赤いレーザーが 3 段、
  * 格子を組んで左右・前後に掃いている。人影は各段の上でぴたりと止まって待ち、
  * 隙間が真下を通る瞬間にだけ一気に抜ける。台座の宝石を手に取ると同じ隙間を逆にたどって昇り、
  * 蓋が閉じる。台座の奥から次の宝石がせり上がって 24 秒で一巡する。
@@ -23,7 +23,7 @@ const SWEEP = 4;
 const LAYERS = [10.5, 7.5, 4.5];
 /** 1 段あたりのレーザーの本数と間隔。中央の 2 本の間が人の抜ける隙間 */
 const BEAMS = 4;
-const GAP = 2.6;
+const GAP = 3.2;
 /** レーザーの長さ（レールからレールまで）と太さ */
 const BEAM_LEN = 9.6;
 const BEAM_R = 0.028;
@@ -35,17 +35,32 @@ const BEAM_GLOW = 0.3;
 const CEIL_Y = 13.6;
 const HATCH = 1.8;
 
-/** 人影の足元の高さの時刻表 [秒, y]。同じ y が続く区間は静止 */
+/**
+ * 人影の腹の高さの時刻表 [秒, y]。同じ y が続く区間は静止。
+ * 水平に寝た姿勢なので、段の 1.2 上で待ち、1.8 下まで抜けると、落ちる途中のちょうど真ん中で格子を通る
+ */
 const PATH: [number, number][] = [
-  [0, 15.5], [1.0, 15.5], [2.6, 11],
-  [2.7, 11], [3.3, 8], // 1 段目を 3 秒で抜ける
-  [6.7, 8], [7.3, 5], // 2 段目は 1 回見送って 7 秒で抜ける
-  [8.7, 5], [9.3, 2], // 3 段目を 9 秒で抜ける
-  [12.7, 2], [13.3, 5],
-  [14.7, 5], [15.3, 8],
-  [16.7, 8], [17.3, 11],
-  [17.6, 11], [19.2, 15.5], [CYCLE, 15.5],
+  [0, 16], [1.0, 16], [2.6, 11.7],
+  [2.7, 11.7], [3.3, 8.7], // 1 段目を 3 秒で抜ける
+  [6.7, 8.7], [7.3, 5.7], // 2 段目は 1 回見送って 7 秒で抜ける
+  [8.7, 5.7], [9.3, 2.3], // 3 段目を 9 秒で抜け、台座の真上へ
+  [12.7, 2.3], [13.3, 5.7],
+  [14.7, 5.7], [15.3, 8.7],
+  [16.7, 8.7], [17.3, 11.7],
+  [17.6, 11.7], [19.2, 16], [CYCLE, 16],
 ];
+/** うつ伏せの人影の、足先から胴の中心までの長さ。これで胴を回転の中心へ寄せる */
+const BODY_CENTER = 0.95;
+/** 背中の吊り金具の位置（人影の座標で、上と頭の側） */
+/** 人影の大きさの倍率 */
+const FIG_SCALE = 1.2;
+const CLIP_Y = 0.48 * FIG_SCALE;
+const CLIP_Z = (1.1 - BODY_CENTER) * FIG_SCALE;
+/** 人影の向き（鉛直軸まわり）。頭から足までが画面の左右に伸びる向きを中心に小さく揺れる */
+const FACING = -0.98;
+const FACING_SWAY = 0.2;
+/** 体を長軸まわりにカメラ側へ傾ける角度。真横から見ても開いた手足が胴から離れて見える */
+const ROLL = -0.3;
 
 /** 蓋の開閉の時刻 */
 const HATCH_OPEN: [number, number] = [0.1, 1.0];
@@ -61,7 +76,7 @@ const GEM_Y = 1.55;
 const PASS_TIMES = [3, 7, 9, 13, 15, 17];
 const PICK_TIME = 10.5;
 
-const camera = { pos: [8, 12.5, 12] as [number, number, number], target: [0, 6.2, 0] as [number, number, number] };
+const camera = { pos: [7.2, 11.6, 10.8] as [number, number, number], target: [0, 6.2, 0] as [number, number, number] };
 
 // --------------------------------------------------------------------------
 
@@ -88,7 +103,7 @@ const smooth = (x: number): number => {
 };
 const span = (u: number, [a, b]: [number, number]): number => smooth((u - a) / (b - a));
 
-/** 足元の y。時刻表を補間し、止まった直後にワイヤーの伸びで小さく弾む */
+/** 腹の高さの y。時刻表を補間し、止まった直後にワイヤーの伸びで小さく弾む */
 function feetY(u: number): number {
   for (let i = 1; i < PATH.length; i++) {
     const [t1, y1] = PATH[i];
@@ -112,7 +127,7 @@ function beamOffset(i: number, t: number): number {
   return sign * (GAP / 2) * Math.cos((Math.PI * 2 * t) / SWEEP);
 }
 
-/** 人影を組む。足元が原点。明るめの灰で、暗がりでもシルエットが読めるように */
+/** 人影を組む。うつ伏せで、腹の下・胴の中心が原点。明るめの灰で、暗がりでもシルエットが読めるように */
 function buildAgent(): THREE.Group {
   const g = new THREE.Group();
   const suit = new THREE.MeshStandardMaterial({
@@ -122,24 +137,28 @@ function buildAgent(): THREE.Group {
   });
   const cap = (r: number, len: number): THREE.CapsuleGeometry => new THREE.CapsuleGeometry(r, len, 6, 12);
 
-  const torso = new THREE.Mesh(cap(0.23, 0.5), suit);
-  torso.position.y = 1.2;
-  g.add(torso);
+  // まず立ち姿の座標で組み（-z が背中）、最後にうつ伏せへ倒す
+  const body = new THREE.Group();
+  const part = (geo: THREE.BufferGeometry, x: number, y: number, z: number, rx = 0, rz = 0): void => {
+    const m = new THREE.Mesh(geo, suit);
+    m.position.set(x, y, z);
+    m.rotation.set(rx, 0, rz);
+    body.add(m);
+  };
 
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 20, 14), suit);
-  head.position.y = 1.66;
-  g.add(head);
+  part(cap(0.23, 0.5), 0, 1.2, 0);
+  // 頭は胴より丸く、少し明るくして、どちらが頭か分かるようにする
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.21, 24, 16),
+    new THREE.MeshStandardMaterial({ color: emberColor(0.75, 0, -0.05), roughness: 0.5, metalness: 0.1 }),
+  );
+  head.position.set(0, 1.7, -0.08);
+  body.add(head);
 
   for (const s of [-1, 1]) {
-    const leg = new THREE.Mesh(cap(0.1, 0.62), suit);
-    leg.position.set(s * 0.21, 0.44, 0);
-    leg.rotation.z = s * 0.28;
-    g.add(leg);
-
-    const arm = new THREE.Mesh(cap(0.075, 0.55), suit);
-    arm.position.set(s * 0.56, 1.2, 0);
-    arm.rotation.z = s * 1.1;
-    g.add(arm);
+    // 手足を大きく X の字に開く（スカイダイビングの姿勢）。先を少しだけ背中側へ持ち上げる
+    part(cap(0.075, 0.6), s * 0.49, 1.66, -0.2, -0.45, -s * 0.8);
+    part(cap(0.1, 0.7), s * 0.28, 0.44, -0.18, 0.35, s * 0.4);
   }
 
   // 背中の吊り金具
@@ -147,14 +166,24 @@ function buildAgent(): THREE.Group {
     new THREE.TorusGeometry(0.07, 0.02, 6, 16),
     new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.3, metalness: 0.9 }),
   );
-  clip.position.set(0, 1.5, -0.2);
-  g.add(clip);
+  clip.position.set(0, 1.1, -0.25);
+  clip.rotation.x = Math.PI / 2;
+  body.add(clip);
+
+  // うつ伏せに倒す: 頭が +z、背中が上。胴の中心を原点の真上へ、腹を y = 0 へ
+  body.rotation.x = Math.PI / 2;
+  body.position.set(0, 0.23, -BODY_CENTER);
+  const roll = new THREE.Group();
+  roll.rotation.z = ROLL;
+  roll.add(body);
+  g.add(roll);
+  g.scale.setScalar(FIG_SCALE);
   return g;
 }
 
 export const missionImpossible: SceneModule = {
   name: 'Mission Impossible',
-  desc: '天井から吊られた人影が、掃いていく赤いレーザーの隙間を段ごとに待って抜け、宝石を取って昇っていく。',
+  desc: '天井から水平に吊られた人影が、掃いていく赤いレーザーの隙間を段ごとに待って抜け、宝石を取って昇っていく。',
   camera,
 
   build(root) {
@@ -214,7 +243,7 @@ export const missionImpossible: SceneModule = {
     root.add(gem);
 
     // レーザー格子とレール
-    const railGeo = new THREE.BoxGeometry(11.4, 0.14, 0.14);
+    const railGeo = new THREE.BoxGeometry(13.4, 0.14, 0.14);
     LAYERS.forEach((y, i) => {
       for (const s of [-1, 1]) {
         const rail = new THREE.Mesh(railGeo, dark);
@@ -241,7 +270,7 @@ export const missionImpossible: SceneModule = {
     root.add(agent);
     const wireGeo = new THREE.CylinderGeometry(0.022, 0.022, 1, 5);
     wireGeo.translate(0, 0.5, 0);
-    wire = new THREE.Mesh(wireGeo, new THREE.MeshBasicMaterial({ color: emberColor(0.8, 0, 0.12) }));
+    wire = new THREE.Mesh(wireGeo, new THREE.MeshBasicMaterial({ color: emberColor(0.75, 0, 0.02) }));
     root.add(wire);
   },
 
@@ -258,20 +287,22 @@ export const missionImpossible: SceneModule = {
     // 人影
     const y = feetY(u);
     agent.position.set(0, y, 0);
-    agent.rotation.y = 0.35 * Math.sin(t * 0.4) + 0.4;
-    const attach = y + 1.5;
-    wire.position.set(0, attach, -0.2);
+    const ry = FACING + FACING_SWAY * Math.sin(t * 0.4);
+    agent.rotation.y = ry;
+    const attach = y + Math.cos(ROLL) * CLIP_Y;
+    const cx = -Math.sin(ROLL) * CLIP_Y;
+    wire.position.set(Math.cos(ry) * cx + Math.sin(ry) * CLIP_Z, attach, -Math.sin(ry) * cx + Math.cos(ry) * CLIP_Z);
     wire.scale.y = Math.max(0.01, 20 - attach);
 
-    // 宝石: 台座から手元へ浮き、人影と一緒に去る。あとで台座の奥から次が出る
-    const handY = y + 1.0;
+    // 宝石: 台座から胸の下へ浮き、人影と一緒に去る。あとで台座の奥から次が出る
+    const handY = y - 0.15;
     const lift = span(u, GEM_LIFT);
     const rise = span(u, GEM_RISE);
     if (u < GEM_LIFT[0]) {
       gem.position.set(0, GEM_Y, 0);
       gem.scale.set(1, 1.35, 1);
     } else if (u < GEM_RISE[0]) {
-      gem.position.set(0, GEM_Y + (handY - GEM_Y) * lift, 0.4 * lift);
+      gem.position.set(Math.sin(ry) * 0.35 * lift, GEM_Y + (handY - GEM_Y) * lift, Math.cos(ry) * 0.35 * lift);
       gem.scale.set(1, 1.35, 1);
     } else {
       gem.position.set(0, GEM_Y - 0.4 * (1 - rise), 0);
