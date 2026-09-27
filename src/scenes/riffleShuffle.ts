@@ -34,7 +34,7 @@ const TH = 0.085;
 const GAP = 0.5;
 
 /** 割った山を置く位置（中心からの x） */
-const SEP = 3.2;
+const SEP = 2.5;
 /** 落ちたカードが重なる位置（寄せる前の左右のずれ） */
 const STAG = 0.45;
 /** 上半分を持ち上げて運ぶときの弧の高さ */
@@ -44,9 +44,9 @@ const TILT = 0.02;
 /** 1 段上がるごとに傾きを減らす量。下のカードほど深く垂れて、内側の端が扇状に開く */
 const FAN = 0.003;
 /** しなりの曲率（1/半径）。負で上に凸に反り、外側の端を支点に内側の端が山へ垂れる */
-const BEND = -0.1;
+const BEND = -0.085;
 /** 反らせた束を、落ちた山の上面からどれだけ浮かせるか。落ちる隙間を見せる */
-const HOVER = 0.85;
+const HOVER = 1.4;
 /** 長辺方向の分割数。曲げたときに折れ線に見えない程度 */
 const SEG = 24;
 /** 着地してから揺れが収まるまでの秒数と、揺れの大きさ（しなりに対する比） */
@@ -168,7 +168,7 @@ function inHalf(c: number, u: number): void {
 export const riffleShuffle: SceneModule = {
   name: 'Riffle Shuffle',
   desc: '割った山から一枚ずつ交互に落として重ねる。縞にばらけた色は 5 回切ると元の順に戻る。',
-  camera: { pos: [0, 6.4, 8.9], target: [0, 0.9, 0] },
+  camera: { pos: [0, 5.4, 9.4], target: [0, 1.1, 0] },
 
   build(root) {
     landTick = ticker();
