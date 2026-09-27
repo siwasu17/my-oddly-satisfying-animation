@@ -42,6 +42,11 @@ const TMP_R = 9.5;
 const TMP_SPAN = 0.62;
 const TMP_Y = 0.9;
 
+/** チェロの胴の下端・高さ、棹の長さ */
+const BODY_Y0 = 0.12;
+const BODY_H = 1.05;
+const NECK = 1.0;
+
 /** 中央から端まで反応が伝わる遅れ（秒 / ラジアン） */
 const RIPPLE = 0.13;
 /** 鳴ったあとの光と膨らみが引く速さ */
@@ -115,9 +120,9 @@ const ICTUS: [number, number][] = [
 /** 打点から次の打点へ移るあいだの跳ね上がり */
 const BOUNCE = [0.32, 0.3, 0.26, 0.62];
 
-const SHOULDER = new THREE.Vector3(CX + 0.27, 2.0, CZ - 0.05);
+const SHOULDER = new THREE.Vector3(CX + 0.3, 1.82, CZ - 0.05);
 const ARM = 0.52;
-const STICK = 0.62;
+const STICK = 0.9;
 
 /** 時刻 s の指揮棒の向き（肩から先の単位ベクトル）を out に書く */
 function batonDir(s: number, out: THREE.Vector3): THREE.Vector3 {
@@ -213,6 +218,52 @@ function riser(root: THREE.Group, r0: number, r1: number, span: number, h: numbe
   root.add(mesh);
 }
 
+/** くびれのあるチェロの胴。輪郭を押し出して作る */
+function celloGeo(): THREE.BufferGeometry {
+  const seg = 40;
+  const w = (u: number): number =>
+    Math.sqrt(Math.sin(Math.PI * u)) *
+    (0.2 + 0.2 * Math.exp(-(((u - 0.3) / 0.2) ** 2)) + 0.12 * Math.exp(-(((u - 0.78) / 0.14) ** 2)));
+  const shape = new THREE.Shape();
+  for (let i = 0; i <= seg; i++) {
+    const u = i / seg;
+    if (i === 0) shape.moveTo(0, 0);
+    else shape.lineTo(w(u), u * BODY_H);
+  }
+  for (let i = seg - 1; i >= 1; i--) {
+    const u = i / seg;
+    shape.lineTo(-w(u), u * BODY_H);
+  }
+  const geo = new THREE.ExtrudeGeometry(shape, {
+    depth: 0.12,
+    bevelEnabled: true,
+    bevelThickness: 0.04,
+    bevelSize: 0.03,
+    bevelSegments: 3,
+    curveSegments: 1,
+  });
+  geo.translate(0, BODY_Y0, -0.06);
+  return geo;
+}
+
+/** 同じ属性を持つジオメトリを 1 つにまとめる（位置・法線・UV だけ） */
+function mergeGeo(list: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  const parts = list.map((g) => (g.index ? g.toNonIndexed() : g));
+  const out = new THREE.BufferGeometry();
+  for (const name of ['position', 'normal', 'uv']) {
+    const size = parts[0].getAttribute(name).itemSize;
+    const total = parts.reduce((n, g) => n + g.getAttribute(name).array.length, 0);
+    const arr = new Float32Array(total);
+    let o = 0;
+    for (const g of parts) {
+      arr.set(g.getAttribute(name).array as Float32Array, o);
+      o += g.getAttribute(name).array.length;
+    }
+    out.setAttribute(name, new THREE.BufferAttribute(arr, size));
+  }
+  return out;
+}
+
 /** 鳴ってからの減衰（0..1）。遅れ d を足した時刻で見る */
 function env(p: Part, t: number, d: number): number {
   const tb = lastBeat(p, t - d) * BEAT + d;
@@ -222,7 +273,7 @@ function env(p: Part, t: number, d: number): number {
 export const orchestra: SceneModule = {
   name: 'Orchestra',
   desc: '指揮棒が 4 拍子を描くたび、弦・ホルン・ティンパニが中央から順に応える。',
-  camera: { pos: [0, 8.6, 16.5], target: [0, 1.4, -1.2] },
+  camera: { pos: [0, 6.4, 12.2], target: [0, 1.1, -1.6] },
 
   build(root) {
     tick = ticker();
@@ -230,7 +281,7 @@ export const orchestra: SceneModule = {
     // 床
     const floor = new THREE.Mesh(
       new THREE.CircleGeometry(15, 96),
-      new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.28, metalness: 0.85 }),
+      new THREE.MeshStandardMaterial({ color: SURFACE, roughness: 0.7, metalness: 0.3 }),
     );
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.02;
@@ -244,22 +295,28 @@ export const orchestra: SceneModule = {
     const dark = new THREE.MeshStandardMaterial({ color: emberColor(0.12), roughness: 0.5, metalness: 0.3 });
 
     // 弦: 胴（潰した球）・棹・弓
-    const bodyGeo = new THREE.SphereGeometry(1, 24, 16);
-    bodyGeo.scale(0.34, 0.56, 0.15);
-    bodyGeo.translate(0, 0.62, 0);
-    celloBody = instanced(root, bodyGeo, STR_N, wood);
-    const neckGeo = new THREE.BoxGeometry(0.07, 0.95, 0.06);
-    neckGeo.translate(0, 1.55, 0);
-    celloNeck = instanced(root, neckGeo, STR_N, dark);
-    const bowGeo = new THREE.CylinderGeometry(0.016, 0.016, 1.15, 6);
+    celloBody = instanced(root, celloGeo(), STR_N, wood);
+    const neckGeo = new THREE.BoxGeometry(0.08, NECK, 0.07);
+    neckGeo.translate(0, BODY_Y0 + BODY_H + NECK / 2 - 0.08, 0);
+    const scrollGeo = new THREE.TorusGeometry(0.075, 0.035, 8, 16);
+    scrollGeo.rotateY(Math.PI / 2);
+    scrollGeo.translate(0, BODY_Y0 + BODY_H + NECK - 0.02, 0);
+    const stringsGeo = new THREE.BoxGeometry(0.05, BODY_H * 0.72 + NECK * 0.9, 0.012);
+    stringsGeo.translate(0, BODY_Y0 + BODY_H * 0.2 + (BODY_H * 0.72 + NECK * 0.9) / 2, 0.1);
+    const fGeoL = new THREE.BoxGeometry(0.025, 0.26, 0.012);
+    fGeoL.translate(-0.13, BODY_Y0 + BODY_H * 0.42, 0.095);
+    const fGeoR = fGeoL.clone();
+    fGeoR.translate(0.26, 0, 0);
+    celloNeck = instanced(root, mergeGeo([neckGeo, scrollGeo, stringsGeo, fGeoL, fGeoR]), STR_N, dark);
+    const bowGeo = new THREE.CylinderGeometry(0.018, 0.018, 1.2, 6);
     bowGeo.rotateZ(Math.PI / 2 - 0.12);
     bow = instanced(root, bowGeo, STR_N, wood);
 
     // ホルン: 巻き管と朝顔
-    const coilGeo = new THREE.TorusGeometry(0.27, 0.055, 10, 36);
+    const coilGeo = new THREE.TorusGeometry(0.34, 0.07, 10, 36);
     coilGeo.translate(0, 0.95, 0);
     coil = instanced(root, coilGeo, HRN_N, brass);
-    const bellGeo = new THREE.ConeGeometry(0.34, 0.62, 28, 1, true);
+    const bellGeo = new THREE.ConeGeometry(0.58, 0.95, 32, 1, true);
     bell = instanced(root, bellGeo, HRN_N, brass);
 
     // ティンパニ: 釜・皮・マレット
@@ -286,13 +343,19 @@ export const orchestra: SceneModule = {
     const podium = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.66, 0.28, 32), dark);
     podium.position.set(CX, 0.14, CZ);
     root.add(podium);
-    const figure = new THREE.MeshStandardMaterial({ color: emberColor(0.2), roughness: 0.6, metalness: 0.2 });
+    const figure = new THREE.MeshStandardMaterial({ color: emberColor(0.62), roughness: 0.5, metalness: 0.2 });
     const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 0.95, 6, 16), figure);
     torso.position.set(CX, 1.22, CZ);
     root.add(torso);
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 20, 14), figure);
     head.position.set(CX, 2.22, CZ);
     root.add(head);
+
+    // 左腕は横へ開いて構えたまま
+    const left = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.62, 4, 8), figure);
+    left.position.set(CX - 0.55, 1.78, CZ - 0.12);
+    left.rotation.set(0.35, 0, -1.05);
+    root.add(left);
 
     arm = new THREE.Group();
     arm.position.copy(SHOULDER);
@@ -301,7 +364,7 @@ export const orchestra: SceneModule = {
     armMesh.position.y = ARM / 2;
     arm.add(armMesh);
     tipMat = new THREE.MeshStandardMaterial({ color: emberColor(1, 0, 0.25), roughness: 0.4 });
-    const baton = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.02, STICK, 6), tipMat);
+    const baton = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.035, STICK, 8), tipMat);
     baton.position.y = ARM + STICK / 2;
     arm.add(baton);
 
@@ -326,14 +389,14 @@ export const orchestra: SceneModule = {
       batonDir(t - k * TRAIL_DT, v);
       pos.setXYZ(k, SHOULDER.x + v.x * (ARM + STICK), SHOULDER.y + v.y * (ARM + STICK), SHOULDER.z + v.z * (ARM + STICK));
       const fade = Math.pow(1 - k / TRAIL, 2);
-      ember(color, 0.9, hue, 0.1).multiplyScalar(fade);
+      ember(color, 1, hue, 0.25).multiplyScalar(fade);
       col.setXYZ(k, color.r, color.g, color.b);
     }
     pos.needsUpdate = true;
     col.needsUpdate = true;
     // 打点の瞬間だけ指揮棒の先が少し明るむ
     const onBeat = Math.exp(-mod(t, BEAT) * 6);
-    ember(tipMat.color, 1, hue, 0.12 + 0.25 * onBeat);
+    ember(tipMat.color, 1, hue, 0.3 + 0.3 * onBeat);
 
     // 弦
     for (let i = 0; i < STR_N; i++) {
@@ -353,12 +416,12 @@ export const orchestra: SceneModule = {
       part.scale.set(1, 1, 1);
       put(celloBody, i);
       put(celloNeck, i);
-      part.position.set(slide, 0.62, 0.2);
+      part.position.set(slide, BODY_Y0 + BODY_H * 0.34, 0.2);
       put(bow, i);
 
-      ember(color, 0.34 + 0.5 * e, hue, 0.2 * e);
+      ember(color, 0.28 + 0.6 * e, hue, 0.5 * e);
       celloBody.setColorAt(i, color);
-      ember(color, 0.5 + 0.4 * e, hue, 0.25 * e);
+      ember(color, 0.45 + 0.5 * e, hue, 0.45 * e);
       bow.setColorAt(i, color);
     }
 
@@ -373,12 +436,12 @@ export const orchestra: SceneModule = {
       put(coil, i);
       // 朝顔は巻き管の右上から、斜め上の客席側へ開く
       const s = 1 + 0.22 * e;
-      part.position.set(0.3, 1.32, 0.02);
+      part.position.set(0.44, 1.5, 0.02);
       part.rotation.set(0.15, 0, -2.5);
       part.scale.set(s, s, s);
       put(bell, i);
 
-      ember(color, 0.5 + 0.35 * e, hue, 0.22 * e);
+      ember(color, 0.42 + 0.5 * e, hue, 0.45 * e);
       coil.setColorAt(i, color);
       bell.setColorAt(i, color);
     }
@@ -403,7 +466,7 @@ export const orchestra: SceneModule = {
       part.rotation.set(-0.7 - 0.5 * lift, 0, 0);
       put(stick, i);
 
-      ember(color, 0.42 + 0.5 * e, hue, 0.28 * e);
+      ember(color, 0.35 + 0.6 * e, hue, 0.5 * e);
       drumHead.setColorAt(i, color);
       ember(color, 0.6, hue);
       mallet.setColorAt(i, color);
