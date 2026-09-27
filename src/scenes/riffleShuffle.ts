@@ -30,7 +30,7 @@ const CL = 3.6;
 const CW = 2.4;
 /** 1 枚ぶんの高さの刻み。箱はその GAP 倍の厚みにして、縞の境目を見せる */
 const TH = 0.085;
-const GAP = 0.58;
+const GAP = 0.5;
 
 /** 割った山を置く位置（中心からの x） */
 const SEP = 2.7;
@@ -38,8 +38,12 @@ const SEP = 2.7;
 const STAG = 0.45;
 /** 上半分を持ち上げて運ぶときの弧の高さ */
 const LIFT = 1.1;
-/** 内側の端を持ち上げる角度 */
-const TILT = 0.15;
+/** 内側の端を持ち上げる角度（束のいちばん下のカード） */
+const TILT = 0.08;
+/** 1 段上がるごとに足す角度。上のカードほど大きく反って、内側の端が扇状に開く */
+const FAN = 0.018;
+/** 1 段上がるごとに内側へずらす幅。縁が階段状にのぞく */
+const STAIR = 0.035;
 
 /** 1 回ぶんの時刻表（秒） */
 const CYCLE = 8;
@@ -125,11 +129,12 @@ function inHalf(c: number, u: number): void {
 
   // 割る: 中央の山から左右の山へ。上半分は弧を描いて持ち上げて運ぶ
   const y0 = (N - 1 - p0[c]) * TH;
-  const cx = s * SEP * sc;
+  const k = h / TH; // 残っている束の中での段（下から）
+  const cx = s * (SEP - STAIR * k * st) * sc;
   const cy = y0 + (base + h - y0) * sc + (s > 0 ? Math.sin(Math.PI * sc) * LIFT : 0);
 
   // 持ち上げる: 外側の底の角を軸に、内側の端を上げる
-  const a = -s * TILT * st;
+  const a = -s * (TILT + FAN * k) * st;
   const px = s * (SEP + CL / 2);
   const dx = cx - px;
   const dy = cy - base;
