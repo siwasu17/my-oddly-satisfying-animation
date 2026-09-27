@@ -40,7 +40,7 @@ const HRN_Y = 0.45;
 const TMP_N = 4;
 const TMP_R = 9.5;
 const TMP_SPAN = 0.62;
-const TMP_Y = 0.9;
+const TMP_Y = 1.35;
 
 /** チェロの胴の下端・高さ、棹の長さ */
 const BODY_Y0 = 0.12;
@@ -273,7 +273,7 @@ function env(p: Part, t: number, d: number): number {
 export const orchestra: SceneModule = {
   name: 'Orchestra',
   desc: '指揮棒が 4 拍子を描くたび、弦・ホルン・ティンパニが中央から順に応える。',
-  camera: { pos: [0, 6.4, 12.2], target: [0, 1.1, -1.6] },
+  camera: { pos: [0, 7.6, 14.4], target: [0, 1.2, -1.6] },
 
   build(root) {
     tick = ticker();
@@ -316,7 +316,7 @@ export const orchestra: SceneModule = {
     const coilGeo = new THREE.TorusGeometry(0.34, 0.07, 10, 36);
     coilGeo.translate(0, 0.95, 0);
     coil = instanced(root, coilGeo, HRN_N, brass);
-    const bellGeo = new THREE.ConeGeometry(0.58, 0.95, 32, 1, true);
+    const bellGeo = new THREE.ConeGeometry(0.38, 0.66, 32, 1, true);
     bell = instanced(root, bellGeo, HRN_N, brass);
 
     // ティンパニ: 釜・皮・マレット
@@ -364,7 +364,7 @@ export const orchestra: SceneModule = {
     armMesh.position.y = ARM / 2;
     arm.add(armMesh);
     tipMat = new THREE.MeshStandardMaterial({ color: emberColor(1, 0, 0.25), roughness: 0.4 });
-    const baton = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.035, STICK, 8), tipMat);
+    const baton = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.045, STICK, 8), tipMat);
     baton.position.y = ARM + STICK / 2;
     arm.add(baton);
 
@@ -396,7 +396,7 @@ export const orchestra: SceneModule = {
     col.needsUpdate = true;
     // 打点の瞬間だけ指揮棒の先が少し明るむ
     const onBeat = Math.exp(-mod(t, BEAT) * 6);
-    ember(tipMat.color, 1, hue, 0.3 + 0.3 * onBeat);
+    ember(tipMat.color, 1, hue, 0.45 + 0.3 * onBeat);
 
     // 弦
     for (let i = 0; i < STR_N; i++) {
@@ -434,14 +434,14 @@ export const orchestra: SceneModule = {
       part.rotation.set(0, 0, 0);
       part.scale.set(1, 1, 1);
       put(coil, i);
-      // 朝顔は巻き管の右上から、斜め上の客席側へ開く
+      // 朝顔は巻き管の右上から、斜め上の横へ開く
       const s = 1 + 0.22 * e;
-      part.position.set(0.44, 1.5, 0.02);
-      part.rotation.set(0.15, 0, -2.5);
+      part.position.set(0.42, 1.38, -0.02);
+      part.rotation.set(0, 0, 2.6);
       part.scale.set(s, s, s);
       put(bell, i);
 
-      ember(color, 0.42 + 0.5 * e, hue, 0.45 * e);
+      ember(color, 0.42 + 0.5 * e, hue, 0.32 * e);
       coil.setColorAt(i, color);
       bell.setColorAt(i, color);
     }
