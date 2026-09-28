@@ -6,7 +6,7 @@ import { ember, emberColor, drift } from '../palette.ts';
 /**
  * Laundry Line — 草原に並んだ物干し紐のシーツが、風を受けてなびく。
  *
- * 何が動くか: 広い草原に 3 竿の物干し紐。それぞれに洗濯ばさみで留めたシーツが並ぶ。
+ * 何が動くか: 闇に浮かぶ草原に 3 竿の物干し紐。それぞれに洗濯ばさみで留めたシーツが並ぶ。
  *   足元の草はシェル法（地面を薄い層に重ね、層ごとに草の断面だけを残す）で描き、
  *   同じ風で穂先がなびく。
  * 気持ちよさの芯: 絶えず吹く風でシーツがゆるく膨らみ、周期的に来る突風が
@@ -62,16 +62,24 @@ const ROPE_PUSH = 0.35;
 /** 紐を描く区間の数（1 竿あたり） */
 const ROPE_SEG = 48;
 
-/** 草原の広さ（一辺）・中心の z・分割数 */
-const FIELD = 170;
-const FIELD_Z = -35;
-const FIELD_SEG = 280;
+/** 草原の広さ（幅・奥行き）・中心の z・分割数。物干し竿の並ぶ範囲だけに敷く */
+const FIELD_W = 30;
+const FIELD_D = 34;
+const FIELD_Z = -11;
+const FIELD_SEG_W = 48;
+const FIELD_SEG_D = 54;
+/** 草原の縁で草が低くなって闇に溶けていく幅 */
+const FIELD_FADE = 8;
+/** 草原の外に敷く、草の無い地面の半径 */
+const GROUND_R = 90;
 /** 草の層の数・丈・1 単位あたりの株の数 */
 const SHELLS = 26;
 const GRASS_H = 0.6;
 const GRASS_DENSITY = 5.5;
 /** 風で穂先が倒れる量 */
 const GRASS_BEND = 0.55;
+/** 草の根元（最下層）の暗さ。外の地面もこの暗さに揃える */
+const GROUND_DIM = 0.14;
 
 // ---- 導出値 ----
 const COL_V = COLS + 1;
@@ -146,7 +154,7 @@ let ticks = tickers(SHEET_COUNT);
 
 /** シェル法の草原。層ごとに持ち上げ、風の分だけ穂先側を +z へずらす */
 function makeGrass(): THREE.InstancedMesh {
-  const geo = new THREE.PlaneGeometry(FIELD, FIELD, FIELD_SEG, FIELD_SEG);
+  const geo = new THREE.PlaneGeometry(FIELD_W, FIELD_D, FIELD_SEG_W, FIELD_SEG_D);
   geo.rotateX(-Math.PI / 2);
   geo.translate(0, 0, FIELD_Z);
   const layers = new Float32Array(SHELLS);
@@ -201,7 +209,10 @@ float grassHash(vec2 p) {
 vec2 cp = vGrass * ${f(GRASS_DENSITY)};
 vec2 id = floor(cp);
 float h = grassHash(id);
-float bladeH = mix(0.3, 1.0, h);
+// 縁に近いほど草を低く、地面を暗くして、四角い端を闇に溶かす
+float edge = min(${f(FIELD_W / 2)} - abs(vGrass.x), ${f(FIELD_D / 2)} - abs(vGrass.y - ${f(FIELD_Z)}));
+float fade = smoothstep(0.0, ${f(FIELD_FADE)}, edge);
+float bladeH = mix(0.3, 1.0, h) * fade;
 if (vLayer > 0.0) {
   if (vLayer > bladeH) discard;
   vec2 off = vec2(grassHash(id + 3.1), grassHash(id + 7.7)) - 0.5;
@@ -210,7 +221,7 @@ if (vLayer > 0.0) {
   if (length(q) > rad) discard;
 }
 // 根元は暗く、穂先ほど明るい。風に倒れている所は穂先が光を返して明るく見える
-float tipLight = mix(0.15, 0.62, vLayer) * mix(0.8, 1.1, h);
+float tipLight = mix(${f(GROUND_DIM / 0.95)}, 0.62, vLayer) * mix(0.8, 1.1, h);
 tipLight *= 1.0 + 0.4 * max(vWind - ${f(BASE_WIND)}, 0.0) * vLayer;
 diffuseColor.rgb *= tipLight;`,
       );
@@ -236,6 +247,20 @@ export const laundryLine: SceneModule = {
     sheets = [];
 
     root.add(makeGrass());
+
+    // 草原の外へ続く地面。草の根元と同じ暗さにして、区画の縁を見せない（遠くは霧が消す）
+    const ground = new THREE.Mesh(
+      new THREE.CircleGeometry(GROUND_R, 64),
+      new THREE.MeshStandardMaterial({
+        color: emberColor(0.24, 0.03).multiplyScalar(GROUND_DIM),
+        roughness: 1,
+        metalness: 0,
+      }),
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.set(0, -0.01, FIELD_Z);
+    ground.userData.shadow = false;
+    root.add(ground);
 
     // シーツ: 格子の頂点は毎フレーム作り直すので、ここでは面の張り方だけ決める
     const idx: number[] = [];
