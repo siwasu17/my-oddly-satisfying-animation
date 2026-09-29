@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { SceneModule } from '../types.ts';
 import { ticker } from '../audio.ts';
-import { ember, drift } from '../palette.ts';
+import { ember, emberColor, drift } from '../palette.ts';
 
 /**
  * 日没の砂浜。
@@ -14,7 +14,10 @@ import { ember, drift } from '../palette.ts';
  *   6 本で大小の「セット」が一巡する。すべて t から決まるので、開き直しても同じ波が来る。
  * カメラ: 波打ち際から少し下がって腰を下ろした目の高さから、沖の水平線を望む。
  * 音: 崩れる瞬間の低い砕け音、駆け上がる水のざわめき、引き波の泡がはじける細かい音。
- * スコープ外: 巻き波の筒（チューブ）、しぶきの粒、足跡や貝殻、潮の満ち引き。
+ * 浜の小道具: 右手の波打ち際に流木と岩（左端にも小岩を 1 つ）、満潮線に沿って貝殻、背後の砂丘に風にそよぐ草、
+ *   右手の水平線に遠い岬の影、風に乗って沖の空に留まるカモメ 2 羽。太陽の光の道が降りてくる
+ *   中央と左は空けておく。
+ * スコープ外: 巻き波の筒（チューブ）、しぶきの粒、足跡、潮の満ち引き。
  *
  * 形は CPU で作らず、「ある点の水面の高さ」と「ある点の砂の高さ」を返す式を
  * 海・砂・空の 3 つのシェーダで共有している。海は浅いところで砂の式から水深を出して
@@ -86,6 +89,32 @@ const RIPPLE: readonly (readonly [number, number])[] = [
   [0.9, 0.4],
 ];
 const GRAVITY = 6;
+
+/** 流木。中心 [x, z]、長さ、根元の太さ、向き（rad）。砂に少し埋める。 */
+const LOG: { x: number; z: number; len: number; r: number; yaw: number } = {
+  x: 3.2,
+  z: 7.6,
+  len: 3.8,
+  r: 0.2,
+  yaw: -0.35,
+};
+/** 岩。[x, z, 半径]。 */
+const ROCKS: readonly (readonly [number, number, number])[] = [
+  [5.0, 5.9, 0.45],
+  [5.9, 6.7, 0.3],
+  [4.4, 6.9, 0.22],
+  [-4.6, 7.0, 0.28],
+];
+/** 砂丘に植える草の株の数と、1 株あたりの葉の数。 */
+const TUFTS_DUNE = 44;
+const BLADES = 11;
+/** カモメ。留まる位置 [x, y, z]、横へ漂う幅、漂う速さ、位相。 */
+const GULLS: readonly (readonly [number, number, number, number, number, number])[] = [
+  [8, 7.5, -18, 3.5, 0.05, 0.0],
+  [-5, 9, -24, 4.5, 0.04, 2.1],
+];
+/** カモメの大きさ（翼開長はおよそこの 1.7 倍）。 */
+const GULL_SCALE = 2;
 
 // ---------------------------------------------------------------------------
 // 共通の式
@@ -230,6 +259,13 @@ vec3 hazeColor(vec3 d) {
 vec3 sky(vec3 d) {
   vec3 c = skyBase(d);
   if (d.y <= 0.0) return c;
+  // 右手の水平線に低く横たわる遠い岬。霞んで空に溶けかけている
+  float az = atan(d.x, -d.z);
+  float cape = smoothstep(0.2, 0.34, az) * (1.0 - smoothstep(0.8, 1.15, az));
+  float ridge = cape * (0.016 + 0.012 * smoothstep(0.3, 0.62, az) + 0.006 * vnoise(vec2(az * 22.0, 3.0)));
+  if (d.y < ridge) {
+    return mix(lut(0.08) * 0.05, hazeColor(d), 0.4 + 0.4 * (1.0 - d.y / max(ridge, 1e-4)));
+  }
   float mu = dot(d, uSun);
   // 沈みかけた太陽の円盤。下半分は海に隠れる（水平線より下は描かない）
   float ang = sqrt(max(2.0 * (1.0 - mu), 0.0));
@@ -472,6 +508,22 @@ void main() {
 
 const SAND_FRAG = /* glsl */ `
 ${COMMON_GLSL}
+uniform vec4 uLog;                      // 流木の両端 (x0, z0, x1, z1)
+uniform vec4 uRocks[${ROCKS.length}];   // x, z, 半径
+
+/** 流木と岩の根元の陰。置いた物が砂に沈んで見えるように。 */
+float occlusion(vec2 p) {
+  vec2 pa = p - uLog.xy;
+  vec2 ba = uLog.zw - uLog.xy;
+  float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  float o = 1.0 - 0.6 * exp(-pow(length(pa - ba * h) / 0.42, 2.0));
+  for (int i = 0; i < ${ROCKS.length}; i++) {
+    vec4 r = uRocks[i];
+    o *= 1.0 - 0.55 * exp(-pow(length(p - r.xy) / (r.z * 1.45), 2.0));
+  }
+  return o;
+}
+
 void main() {
   vec2 xz = vW.xz;
   float t = uTime;
@@ -537,8 +589,25 @@ void main() {
   float damp = 1.0 - smoothstep(RUN * 0.55, RUN * 1.35, d);
   vec3 alb = sandAlbedo() * mix(1.0, 0.3, max(damp * 0.75, gloss));
 
+  // 貝殻と小石。波の届く帯にまばらに散らばり、濡れると光る
+  vec2 cp = xz * 2.2;
+  vec2 cell = floor(cp);
+  float pick = hash12(cell + 17.0);
+  float shell = 0.0;
+  float tideLine = exp(-pow((d - RUN * 1.15) / 1.6, 2.0));
+  if (pick > 1.0 - 0.07 * tideLine && dist < 24.0) {
+    vec2 q = fract(cp) - 0.5 - (hash22(cell) - 0.5) * 0.5;
+    float a = hash12(cell + 5.0) * 6.2832;
+    q = mat2(cos(a), -sin(a), sin(a), cos(a)) * q;
+    q.x *= 1.5;
+    float r = 0.15 + 0.08 * hash12(cell + 3.0);
+    shell = (1.0 - smoothstep(r * 0.6, r, length(q))) * (1.0 - smoothstep(12.0, 24.0, dist));
+    vec3 sc = hash12(cell + 9.0) > 0.5 ? lut(0.97) * 1.25 : lut(0.8) * 1.05;
+    alb = mix(alb, sc * mix(1.0, 0.7, gloss), shell);
+  }
+
   vec3 N = normalize(vec3(-g.x, 1.0, -g.y));
-  vec3 col = alb * sandLight(N);
+  vec3 col = alb * sandLight(N) * occlusion(xz);
 
   // 濡れた砂と水の膜は空を映す。膜はさざ波が流れ、濡れ砂は少しだけぼやける
   vec2 wg = vec2(0.0);
@@ -557,7 +626,7 @@ void main() {
   vec3 refl = sky(R);
   float mirror = max(cover, gloss * 0.75);
   col = mix(col * mix(1.0, exp(-sheet * 6.0), cover), refl, F * mirror);
-  float shin = mix(160.0, 900.0, cover);
+  float shin = mix(160.0, 900.0, max(cover, shell * gloss));
   col += lut(1.0) * pow(max(dot(R, uSun), 0.0), shin) * shin * 0.003 * mirror * ${f(SUN_GLINT)};
   // 濡れた面には、太陽の方角へ伸びる幅の広い照り返しの帯が立つ
   col += lut(0.9) * pow(max(dot(R, uSun), 0.0), 40.0) * 0.6 * mirror;
@@ -571,12 +640,88 @@ void main() {
 }
 `;
 
+/** 流木・岩・草。浜と同じ光で照らし、夕日を背にした縁だけ明るく縁取る。 */
+const PROP_VERT = /* glsl */ `
+${COMMON_GLSL}
+uniform float uSway;
+varying vec3 vN;
+void main() {
+  vec4 w = vec4(position, 1.0);
+  vec3 n = normal;
+  #ifdef USE_INSTANCING
+    w = instanceMatrix * w;
+    n = mat3(instanceMatrix) * n;
+  #endif
+  w = modelMatrix * w;
+  if (uSway > 0.0) {
+    // 草は根元を留めたまま、先ほど大きく風に振れる
+    float k = position.y * position.y;
+    float gust = sin(uTime * 1.1 + w.x * 0.35 + w.z * 0.2) * 0.6 + sin(uTime * 2.3 + w.x * 1.3) * 0.25;
+    w.x += gust * uSway * k;
+    w.z += gust * uSway * k * 0.4;
+  }
+  vN = normalize(mat3(modelMatrix) * n);
+  vW = w.xyz;
+  gl_Position = projectionMatrix * viewMatrix * w;
+}
+`;
+
+const PROP_FRAG = /* glsl */ `
+${COMMON_GLSL}
+uniform float uTone;
+uniform float uAlb;
+uniform float uGrain;
+varying vec3 vN;
+void main() {
+  vec3 toCam = cameraPosition - vW;
+  float dist = length(toCam);
+  vec3 V = toCam / dist;
+  vec3 N = normalize(vN);
+  if (dot(N, V) < 0.0) N = -N;
+  // 木目・岩肌のむら
+  float grain = vnoise(vec2(vW.x * 1.3 + vW.z * 1.3, vW.y * 14.0)) * 0.6 + vnoise(vW.xz * 5.0 + vW.y * 5.0) * 0.4;
+  vec3 alb = lut(uTone) * uAlb * mix(1.0, 0.55 + 0.9 * grain, uGrain);
+  vec3 col = alb * sandLight(N);
+  // 砂からの照り返し
+  col += alb * lut(0.7) * 0.12 * max(-N.y, 0.0);
+  // 逆光の縁取り
+  float rim = pow(1.0 - max(dot(N, V), 0.0), 3.0) * pow(max(dot(-V, uSun), 0.0), 2.0);
+  col += lut(0.9) * rim * 0.3;
+  col = mix(col, hazeColor(-V), 1.0 - exp(-pow(dist / HAZE, 2.0)));
+  gl_FragColor = vec4(col, 1.0);
+  ${OUT}
+}
+`;
+
 // ---------------------------------------------------------------------------
+
+const clamp01 = (x: number): number => (x < 0 ? 0 : x > 1 ? 1 : x);
+const smoothstep = (a: number, b: number, x: number): number => {
+  const k = clamp01((x - a) / (b - a));
+  return k * k * (3 - 2 * k);
+};
+/** シェーダの shoreZ / sandH と同じ式。小道具を砂の上に置くのに使う。 */
+const shoreZ = (x: number): number => 0.9 * Math.sin(x * 0.045 + 0.6) + 0.35 * Math.sin(x * 0.13 + 2.0);
+function sandHeight(x: number, z: number): number {
+  const d = z - shoreZ(x);
+  return SLOPE * d + 1.5 * smoothstep(24, 46, d) * (0.62 + 0.38 * Math.sin(x * 0.07 + 1.3));
+}
+
+/** 毎回同じ浜になるよう、固定の漸化式で散らす。 */
+function rng(seed: number): () => number {
+  let s = seed;
+  return () => {
+    s = (s * 9301 + 0.49297) % 1;
+    return s;
+  };
+}
 
 const uniforms = {
   uTime: { value: 0 },
   uLut: { value: Array.from({ length: LUT_N }, () => new THREE.Color()) },
   uSun: { value: new THREE.Vector3() },
+  uLog: { value: new THREE.Vector4() },
+  uRocks: { value: ROCKS.map(() => new THREE.Vector4()) },
 };
 
 function bakeLut(t: number): void {
@@ -591,6 +736,230 @@ function material(frag: string, displace: number, side: THREE.Side = THREE.Front
     fragmentShader: frag,
     side,
     depthWrite: displace !== 0,
+  });
+}
+
+function propMaterial(tone: number, alb: number, grain: number, sway = 0): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      ...uniforms,
+      uTone: { value: tone },
+      uAlb: { value: alb },
+      uGrain: { value: grain },
+      uSway: { value: sway },
+    },
+    vertexShader: PROP_VERT,
+    fragmentShader: PROP_FRAG,
+    side: sway > 0 ? THREE.DoubleSide : THREE.FrontSide,
+  });
+}
+
+/**
+ * 流木。波に洗われて白く乾いた幹。根元は太くこぶになり、先へ細ってゆき、
+ * 途中で横へ 2 度曲がる。短く折れた枝の付け根を 2 本残す。
+ *
+ * 幹は y 軸に沿って作り、最後に寝かせる。寝かせると局所の x が上下、z が水平になるので、
+ * 曲げは z にだけ入れて、両端を砂から浮かせない。
+ */
+function buildLog(root: THREE.Group): void {
+  const mat = propMaterial(0.92, 0.55, 0.55);
+  const { x, z, len, r, yaw } = LOG;
+  const cy = sandHeight(x, z) + r * 0.35;
+  /** 幹の芯の横ずれ。y は -len/2（根元）〜 len/2（先）。 */
+  const bend = (y: number): number => 0.3 * Math.sin(y * 0.9 + 0.4) + 0.12 * Math.sin(y * 2.3);
+  /** 太さの輪郭。根元は太く、先は細く。 */
+  const girth = (y: number): number => {
+    const u = y / len + 0.5;
+    return r * (1.25 - 0.95 * Math.pow(u, 0.8));
+  };
+  const place = (g: THREE.BufferGeometry): void => {
+    g.rotateZ(Math.PI / 2);
+    g.rotateY(yaw);
+    g.translate(x, cy, z);
+    g.computeVertexNormals();
+    root.add(new THREE.Mesh(g, mat));
+  };
+
+  const trunk = new THREE.CylinderGeometry(1, 1, len, 18, 24, true);
+  const p = trunk.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < p.count; i++) {
+    const py = p.getY(i);
+    const th = Math.atan2(p.getZ(i), p.getX(i));
+    const k = girth(py) * (1 + 0.1 * Math.sin(py * 2.1 + th * 2) + 0.06 * Math.sin(py * 5.3 - th * 3) + 0.04 * Math.sin(th * 9 + py * 3));
+    p.setXYZ(i, Math.cos(th) * k, py, Math.sin(th) * k + bend(py));
+  }
+  place(trunk);
+
+  // 両端は平らな切り口にせず、丸めて閉じる（根元はこぶ、先は裂けて細った丸み）
+  const cap = (y: number, rr: number, squash: number): void => {
+    const g = new THREE.SphereGeometry(rr, 14, 10);
+    g.scale(1, squash, 1);
+    g.translate(0, y, bend(y));
+    place(g);
+  };
+  cap(-len / 2, girth(-len / 2) * 1.08, 0.8);
+  cap(len / 2, girth(len / 2) * 1.02, 1.6);
+
+  // 折れた枝の付け根。水平に近く張り出させ、砂に刺さらないようにする
+  const branch = (along: number, spin: number, l: number, br: number): void => {
+    const g = new THREE.CylinderGeometry(br * 0.35, br, l, 8, 3);
+    g.translate(0, l / 2, 0);
+    g.rotateX(Math.PI / 2 - 0.5);
+    g.rotateY(spin);
+    g.translate(0, along, bend(along));
+    place(g);
+  };
+  branch(-0.5, 0.35, 0.75, girth(-0.5) * 0.45);
+  branch(0.8, Math.PI + 0.3, 0.5, girth(0.8) * 0.5);
+
+  const dx = Math.cos(yaw) * (len / 2);
+  const dz = -Math.sin(yaw) * (len / 2);
+  uniforms.uLog.value.set(x - dx, z - dz, x + dx, z + dz);
+}
+
+/** 岩。球をでこぼこに崩し、平たく潰して砂に半分埋める。 */
+function buildRocks(root: THREE.Group): void {
+  const mat = propMaterial(0.12, 0.2, 0.8);
+  const rand = rng(0.417);
+  ROCKS.forEach(([x, z, r], i) => {
+    const g = new THREE.SphereGeometry(1, 22, 16);
+    const p = g.attributes.position as THREE.BufferAttribute;
+    const a = rand() * 6;
+    const b = rand() * 6;
+    for (let j = 0; j < p.count; j++) {
+      const vx = p.getX(j);
+      const vy = p.getY(j);
+      const vz = p.getZ(j);
+      const k =
+        1 +
+        0.18 * Math.sin(vx * 2.3 + a) * Math.sin(vz * 2.1 + b) +
+        0.08 * Math.sin(vy * 5 + vx * 4 + a) +
+        0.05 * Math.sin(vz * 9 + b);
+      p.setXYZ(j, vx * k, vy * k, vz * k);
+    }
+    g.scale(r * 1.25, r * 0.72, r);
+    g.rotateY(rand() * 6);
+    g.translate(x, sandHeight(x, z) + r * 0.12, z);
+    g.computeVertexNormals();
+    root.add(new THREE.Mesh(g, mat));
+    uniforms.uRocks.value[i].set(x, z, r, 0);
+  });
+}
+
+/** 浜の草。細い葉を株ごとに束ね、背後の砂丘に植える（波打ち際には生やさない）。 */
+function buildGrass(root: THREE.Group): void {
+  const blade = new THREE.PlaneGeometry(0.035, 1, 1, 5);
+  blade.translate(0, 0.5, 0);
+  // 先を細らせる
+  const p = blade.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < p.count; i++) p.setX(i, p.getX(i) * (1 - p.getY(i) * 0.9));
+
+  const tufts: [number, number][] = [];
+  const rand = rng(0.2831);
+  for (let i = 0; i < TUFTS_DUNE; i++) {
+    const x = -42 + rand() * 84;
+    tufts.push([x, shoreZ(x) + 17 + rand() * 16]);
+  }
+
+  const mesh = new THREE.InstancedMesh(blade, propMaterial(0.42, 0.34, 0.3, 0.1), tufts.length * BLADES);
+  const dummy = new THREE.Object3D();
+  dummy.rotation.order = 'YXZ';
+  let n = 0;
+  for (const [tx, tz] of tufts) {
+    const size = 0.7 + rand() * 0.6;
+    for (let b = 0; b < BLADES; b++) {
+      const a = rand() * Math.PI * 2;
+      const rr = rand() * 0.22;
+      const bx = tx + Math.cos(a) * rr;
+      const bz = tz + Math.sin(a) * rr;
+      dummy.position.set(bx, sandHeight(bx, bz) - 0.03, bz);
+      dummy.rotation.set(0.15 + rand() * 0.45, a, 0);
+      const h = (0.35 + rand() * 0.45) * size;
+      dummy.scale.set(1, h, 1);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(n++, dummy.matrix);
+    }
+  }
+  // 株は浜じゅうに散っているので、1 枚の葉の大きさで画面外と判定させない
+  mesh.frustumCulled = false;
+  root.add(mesh);
+}
+
+/** カモメ 1 羽。胴と、付け根と先の 2 節に分けた翼（先を下げて M 字に見せる）。 */
+interface Gull {
+  body: THREE.Group;
+  inner: THREE.Object3D[];
+  outer: THREE.Object3D[];
+}
+let gulls: Gull[] = [];
+
+function buildGulls(root: THREE.Group): void {
+  const mat = new THREE.MeshBasicMaterial({ color: emberColor(0.3, 0, -0.2), side: THREE.DoubleSide });
+  const bodyGeo = new THREE.SphereGeometry(0.1, 8, 6);
+  bodyGeo.scale(0.8, 0.7, 3.2);
+  const wingGeo = (w: number, root0: number, tip: number): THREE.BufferGeometry => {
+    const g = new THREE.BufferGeometry();
+    // 付け根 (x=0) から先 (x=w) へ。前縁は直線、後縁を細らせる
+    g.setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute([0, 0, -root0 * 0.4, w, 0, -tip * 0.3, w, 0, tip * 0.7, 0, 0, root0 * 0.6], 3),
+    );
+    g.setIndex([0, 1, 2, 0, 2, 3]);
+    return g;
+  };
+  // 遠目でも翼が途切れて見えないよう、付け根側は幅を持たせる
+  const innerGeo = wingGeo(0.42, 0.3, 0.25);
+  const outerGeo = wingGeo(0.4, 0.25, 0.06);
+
+  gulls = GULLS.map(() => {
+    const body = new THREE.Group();
+    body.rotation.order = 'YXZ';
+    body.scale.setScalar(GULL_SCALE);
+    body.add(new THREE.Mesh(bodyGeo, mat));
+    const inner: THREE.Object3D[] = [];
+    const outer: THREE.Object3D[] = [];
+    for (const side of [1, -1]) {
+      const a = new THREE.Group();
+      a.scale.x = side;
+      const iw = new THREE.Mesh(innerGeo, mat);
+      const b = new THREE.Group();
+      b.position.x = 0.42;
+      b.add(new THREE.Mesh(outerGeo, mat));
+      iw.add(b);
+      a.add(iw);
+      body.add(a);
+      inner.push(iw);
+      outer.push(b);
+    }
+    root.add(body);
+    return { body, inner, outer };
+  });
+}
+
+/**
+ * 海から吹く風に向かって空に留まり、ゆっくり横へ漂う。ときどき数回だけ羽ばたく。
+ * 旋回させると、真横を向いた瞬間に翼が奥行きに潰れて鳥に見えなくなるので、
+ * 機首はいつも沖へ向けたまま、わずかに振るだけにする。
+ */
+function updateGulls(t: number): void {
+  gulls.forEach((g, i) => {
+    const [cx, cy, cz, drift, w, ph] = GULLS[i];
+    const a = ph + t * w * Math.PI * 2;
+    g.body.position.set(
+      cx + Math.sin(a) * drift,
+      cy + Math.sin(t * 0.3 + ph) * 0.6,
+      cz + Math.sin(a * 0.7 + 1.3) * drift * 0.5,
+    );
+    // 漂う向きへ少しだけ機首を振り、その側へ傾ける
+    const yaw = -Math.cos(a) * 0.3;
+    g.body.rotation.y = yaw;
+    g.body.rotation.z = yaw * 0.8;
+    const burst = smoothstep(0.55, 0.95, Math.sin(t * 0.35 + ph * 1.7));
+    const flap = Math.sin(t * 6.5 + ph) * 0.55 * burst;
+    for (let k = 0; k < 2; k++) {
+      g.inner[k].rotation.z = 0.28 + flap;
+      g.outer[k].rotation.z = -0.5 - flap * 0.5;
+    }
   });
 }
 
@@ -640,11 +1009,19 @@ export const sunsetCoast: SceneModule = {
 
     // 砂浜。浅瀬の下から陸の奥まで 1 枚
     root.add(new THREE.Mesh(plane(520, 230, 260, 115, 0, 109), material(SAND_FRAG, -1)));
+
+    // 浜の小道具
+    buildLog(root);
+    buildRocks(root);
+    buildGrass(root);
+    buildGulls(root);
+    updateGulls(0);
   },
 
   update(t) {
     uniforms.uTime.value = t;
     bakeLut(t);
+    updateGulls(t);
   },
 
   sound(t, _dt, sfx) {
