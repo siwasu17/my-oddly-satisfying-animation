@@ -38,8 +38,8 @@ const SHEET_W = 2.5;
 const SHEET_GAP = 0.4;
 const SHEET_H = [3.0, 3.35, 2.8, 3.2];
 /** 布の分割数（横・縦） */
-const COLS = 24;
-const ROWS = 32;
+const COLS = 16;
+const ROWS = 22;
 /** 常に吹いている風の強さ（rad。布が鉛直から傾く角度） */
 const BASE_WIND = 0.32;
 /** 突風で足される強さ */
@@ -60,26 +60,25 @@ const BELLY = 0.28;
 /** 紐が風に押されて前へ出る量 */
 const ROPE_PUSH = 0.35;
 /** 紐を描く区間の数（1 竿あたり） */
-const ROPE_SEG = 48;
+const ROPE_SEG = 24;
 
 /** 草原の広さ（幅・奥行き）・中心の z・分割数。物干し竿の並ぶ範囲だけに敷く */
-const FIELD_W = 30;
-const FIELD_D = 34;
+const FIELD_W = 27;
+const FIELD_D = 31;
 const FIELD_Z = -11;
-const FIELD_SEG_W = 48;
-const FIELD_SEG_D = 54;
+const FIELD_SEG_W = 30;
+const FIELD_SEG_D = 34;
 /** 草原の縁で草が低くなって闇に溶けていく幅 */
-const FIELD_FADE = 8;
-/** 草原の外に敷く、草の無い地面の半径 */
-const GROUND_R = 90;
-/** 草の層の数・丈・1 単位あたりの株の数 */
-const SHELLS = 26;
+const FIELD_FADE = 3;
+/** 草の層の数・丈・1 単位あたりの株の数。層の数がそのまま描画の重さになる */
+const SHELLS = 14;
 const GRASS_H = 0.6;
-const GRASS_DENSITY = 5.5;
+const GRASS_DENSITY = 3;
 /** 風で穂先が倒れる量 */
 const GRASS_BEND = 0.55;
-/** 草の根元（最下層）の暗さ。外の地面もこの暗さに揃える */
-const GROUND_DIM = 0.14;
+/** 草の根元（最下層）と穂先の明るさ（光源を使わない材質なので、ここで陰影を付ける） */
+const GROUND_DIM = 0.1;
+const TIP_LIGHT = 0.42;
 
 // ---- 導出値 ----
 const COL_V = COLS + 1;
@@ -145,7 +144,7 @@ interface Sheet {
 }
 let sheets: Sheet[] = [];
 let rope: THREE.InstancedMesh;
-let ropeMat: THREE.MeshStandardMaterial;
+let ropeMat: THREE.MeshLambertMaterial;
 let pins: THREE.InstancedMesh;
 const grassTime = { value: 0 };
 
@@ -161,11 +160,8 @@ function makeGrass(): THREE.InstancedMesh {
   for (let i = 0; i < SHELLS; i++) layers[i] = i / (SHELLS - 1);
   geo.setAttribute('aLayer', new THREE.InstancedBufferAttribute(layers, 1));
 
-  const mat = new THREE.MeshStandardMaterial({
-    color: emberColor(0.24, 0.03),
-    roughness: 0.95,
-    metalness: 0,
-  });
+  // 層の数だけ画面を塗り重ねるので、光の計算をしない材質で軽くする
+  const mat = new THREE.MeshBasicMaterial({ color: emberColor(0.24, 0.03) });
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uTime = grassTime;
     sh.vertexShader = sh.vertexShader
@@ -209,10 +205,11 @@ float grassHash(vec2 p) {
 vec2 cp = vGrass * ${f(GRASS_DENSITY)};
 vec2 id = floor(cp);
 float h = grassHash(id);
-// 縁に近いほど草を低く、地面を暗くして、四角い端を闇に溶かす
+// 縁に近いほど草を低く、地面を暗くして、端を闇に溶かす
 float edge = min(${f(FIELD_W / 2)} - abs(vGrass.x), ${f(FIELD_D / 2)} - abs(vGrass.y - ${f(FIELD_Z)}));
 float fade = smoothstep(0.0, ${f(FIELD_FADE)}, edge);
-float bladeH = mix(0.3, 1.0, h) * fade;
+float bladeH = mix(0.15, 1.0, h * h) * fade;
+diffuseColor.rgb *= fade;
 if (vLayer > 0.0) {
   if (vLayer > bladeH) discard;
   vec2 off = vec2(grassHash(id + 3.1), grassHash(id + 7.7)) - 0.5;
@@ -221,7 +218,7 @@ if (vLayer > 0.0) {
   if (length(q) > rad) discard;
 }
 // 根元は暗く、穂先ほど明るい。風に倒れている所は穂先が光を返して明るく見える
-float tipLight = mix(${f(GROUND_DIM / 0.95)}, 0.62, vLayer) * mix(0.8, 1.1, h);
+float tipLight = mix(${f(GROUND_DIM)}, ${f(TIP_LIGHT)}, vLayer) * mix(0.8, 1.1, h);
 tipLight *= 1.0 + 0.4 * max(vWind - ${f(BASE_WIND)}, 0.0) * vLayer;
 diffuseColor.rgb *= tipLight;`,
       );
@@ -239,7 +236,7 @@ diffuseColor.rgb *= tipLight;`,
 export const laundryLine: SceneModule = {
   name: 'Laundry Line',
   desc: '草原に並んだ物干し紐のシーツが風をはらみ、草を渡ってきた突風に順にはためく。',
-  camera: { pos: [5, 8.2, 17], target: [0, 3.2, -8] },
+  camera: { pos: [4.5, 9.8, 15], target: [0, 2.6, -9] },
   shadows: true,
 
   build(root) {
@@ -247,20 +244,6 @@ export const laundryLine: SceneModule = {
     sheets = [];
 
     root.add(makeGrass());
-
-    // 草原の外へ続く地面。草の根元と同じ暗さにして、区画の縁を見せない（遠くは霧が消す）
-    const ground = new THREE.Mesh(
-      new THREE.CircleGeometry(GROUND_R, 64),
-      new THREE.MeshStandardMaterial({
-        color: emberColor(0.24, 0.03).multiplyScalar(GROUND_DIM),
-        roughness: 1,
-        metalness: 0,
-      }),
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.position.set(0, -0.01, FIELD_Z);
-    ground.userData.shadow = false;
-    root.add(ground);
 
     // シーツ: 格子の頂点は毎フレーム作り直すので、ここでは面の張り方だけ決める
     const idx: number[] = [];
@@ -280,10 +263,9 @@ export const laundryLine: SceneModule = {
         geo.setIndex(idx);
         const mesh = new THREE.Mesh(
           geo,
-          new THREE.MeshStandardMaterial({
+          // つや消しの布なので、軽い Lambert で足りる
+          new THREE.MeshLambertMaterial({
             color: emberColor(0.7 + 0.05 * Math.sin(n * 2.3), 0.025 * Math.cos(n * 1.7)),
-            roughness: 0.85,
-            metalness: 0,
             side: THREE.DoubleSide,
           }),
         );
@@ -300,7 +282,7 @@ export const laundryLine: SceneModule = {
     });
 
     // 紐: 細い円柱を区間ごとに並べる
-    ropeMat = new THREE.MeshStandardMaterial({ color: emberColor(0.45), roughness: 0.7 });
+    ropeMat = new THREE.MeshLambertMaterial({ color: emberColor(0.45) });
     rope = new THREE.InstancedMesh(
       new THREE.CylinderGeometry(0.025, 0.025, 1, 6),
       ropeMat,
