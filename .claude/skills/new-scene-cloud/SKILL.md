@@ -44,7 +44,7 @@ user-invocable: true
 | 6 | `npm run shot` + 講評 | **`node scripts/shot-pw.mjs`** + 講評 |
 | 7 | コミット | 同じ |
 | 8.5 | ゲート 8 項目 | 5 番だけ差し替え（下記） |
-| 9 | `npm run merge-scene` | **push し、プレビューを Artifact に公開して PR を作る。マージしない。PR の監視もしない** |
+| 9 | `npm run merge-scene` | **push し、プレビューを Artifact に公開して PR を作る。** |
 | 10 | `play --bg` で main を起動して報告 | **プレビューと PR の URL、スクショを渡して報告** |
 
 ---
@@ -228,12 +228,6 @@ GitHub MCP の `create_pull_request` を使う（`gh` は無い）。`base` は 
 - `Generated with` がちょうど 1 回
 - `claude.ai/code/session_` も `claude.ai/artifact/` も含まない
 
-### 5. PR は監視しない
-
-PR を作ったらそこで終える。**`subscribe_pr_activity` での購読も、`send_later` などでの
-チェックインの予約もしない。** マージやクローズはユーザーがこのセッションに指示する
-（下の「PR のマージかクローズを指示されたら」）。
-
 ---
 
 ## Phase 10 — 報告して引き渡す
@@ -252,10 +246,7 @@ npm run play -- --stop <scene-name>
 1. シーン名と 1〜2 行の説明
 2. **プレビューの URL**（Artifact）と **PR の URL**（`owner/repo#N` 形式のリンク）。
    プレビューは非公開で、開けるのはユーザー本人だけだと添える
-3. **自分で決めた仕様** — 動きの主役 / ループ周期 / カメラ / 音
-4. 検証結果 — typecheck / build / smoke / `shot-pw`（JS エラーなし）とゲート 8 項目。
-   **講評エージェントの最終回の第一印象をそのまま引用する**。× が付いて直した項目も要約する
-5. 残した worktree とブランチ。PR のマージかクローズをこのセッションに指示すれば、
+3. 残した worktree とブランチ。PR のマージかクローズをこのセッションに指示すれば、
    あわせてプレビューの Artifact を消すこと。プレビューにコメントすればこのセッションに届くことも伝える
 
 ### 直したあと — プレビューを同じ URL に上書きする
