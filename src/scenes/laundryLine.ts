@@ -73,7 +73,10 @@ const FIELD_FADE = 3;
 /** 草の層の数・丈・1 単位あたりの株の数。層の数がそのまま描画の重さになる */
 const SHELLS = 14;
 const GRASS_H = 0.6;
-const GRASS_DENSITY = 3;
+const GRASS_DENSITY = 12;
+/** 株を地面の色に溶かし始める・溶かしきるカメラからの距離（遠くで株が細かすぎて縞になるのを防ぐ） */
+const GRASS_FAR_START = 22;
+const GRASS_FAR_END = 36;
 /** 風で穂先が倒れる量 */
 const GRASS_BEND = 0.55;
 /** 草の根元（最下層）と穂先の明るさ（光源を使わない材質なので、ここで陰影を付ける） */
@@ -173,6 +176,7 @@ uniform float uTime;
 varying float vLayer;
 varying vec2 vGrass;
 varying float vWind;
+varying vec3 vWorldPos;
 ${GLSL_WIND}`,
       )
       .replace(
@@ -180,6 +184,7 @@ ${GLSL_WIND}`,
         `#include <begin_vertex>
 vLayer = aLayer;
 vGrass = transformed.xz;
+vWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
 float w = gustWind(transformed.xz, uTime);
 vWind = w;
 float lean = aLayer * aLayer;
@@ -195,6 +200,7 @@ transformed.x += sway * 0.3 * lean;`,
 varying float vLayer;
 varying vec2 vGrass;
 varying float vWind;
+varying vec3 vWorldPos;
 float grassHash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }`,
@@ -209,17 +215,22 @@ float h = grassHash(id);
 float edge = min(${f(FIELD_W / 2)} - abs(vGrass.x), ${f(FIELD_D / 2)} - abs(vGrass.y - ${f(FIELD_Z)}));
 float fade = smoothstep(0.0, ${f(FIELD_FADE)}, edge);
 float bladeH = mix(0.15, 1.0, h * h) * fade;
+// 遠くで株が画面上 1〜2 px より細かくなると縞（モアレ）になるので、カメラから遠い所だけ株を低くして地面の平均色に溶かす
+float far = smoothstep(${f(GRASS_FAR_START)}, ${f(GRASS_FAR_END)}, distance(vWorldPos, cameraPosition));
+bladeH *= 1.0 - far;
 diffuseColor.rgb *= fade;
 if (vLayer > 0.0) {
   if (vLayer > bladeH) discard;
   vec2 off = vec2(grassHash(id + 3.1), grassHash(id + 7.7)) - 0.5;
   vec2 q = fract(cp) - 0.5 - off * 0.4;
-  float rad = (1.0 - vLayer / bladeH) * 0.7;
+  float rad = (1.0 - vLayer / bladeH) * 0.33;
   if (length(q) > rad) discard;
 }
 // 根元は暗く、穂先ほど明るい。風に倒れている所は穂先が光を返して明るく見える
-float tipLight = mix(${f(GROUND_DIM)}, ${f(TIP_LIGHT)}, vLayer) * mix(0.8, 1.1, h);
-tipLight *= 1.0 + 0.4 * max(vWind - ${f(BASE_WIND)}, 0.0) * vLayer;
+float tipLight = mix(${f(GROUND_DIM)}, ${f(TIP_LIGHT)}, vLayer) * mix(mix(0.8, 1.1, h), 1.0, far);
+tipLight *= 1.0 + 0.4 * max(vWind - ${f(BASE_WIND)}, 0.0) * max(vLayer, far * 0.5);
+// 遠くの地面は、草を平均した明るさにする
+tipLight = mix(tipLight, ${f((GROUND_DIM + TIP_LIGHT) * 0.35)} * (1.0 + 0.3 * max(vWind - ${f(BASE_WIND)}, 0.0)), far * (1.0 - vLayer));
 diffuseColor.rgb *= tipLight;`,
       );
   };
