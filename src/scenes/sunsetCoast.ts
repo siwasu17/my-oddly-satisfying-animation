@@ -106,7 +106,7 @@ const ROCKS: readonly (readonly [number, number, number])[] = [
   [-4.6, 7.0, 0.28],
 ];
 /** 砂丘に植える草の株の数と、1 株あたりの葉の数。 */
-const TUFTS_DUNE = 44;
+const TUFTS_DUNE = 10;
 const BLADES = 11;
 /** カモメ。留まる位置 [x, y, z]、横へ漂う幅、漂う速さ、位相。 */
 const GULLS: readonly (readonly [number, number, number, number, number, number])[] = [
@@ -242,9 +242,16 @@ vec3 skyGrad(vec3 d) {
   float y = max(d.y, 0.0);
   vec2 hz = normalize(d.xz + vec2(1e-5));
   float toward = dot(hz, normalize(uSun.xz)) * 0.5 + 0.5;
-  vec3 zen = lut(0.0) * 0.045;
-  vec3 hor = mix(lut(0.16) * 0.12, lut(0.68) * 0.6, pow(toward, 7.0));
-  return mix(zen, hor, exp(-y * mix(6.0, 11.0, toward)));
+  // 太陽と反対側の空。水平線のすぐ上に地球の影のくすんだ帯、その上に淡い薔薇色の帯
+  // （ビーナスベルト）がかかる。これが無いと陸側を向いたとき空も海も遠景も真っ黒になる。
+  // ember は n < 0.4 で色相が赤より青い側へ回り、暗いと紫に見えるので、こちら側は n を上げる
+  float away = pow(1.0 - toward, 2.0);
+  vec3 zen = lut(mix(0.1, 0.45, away)) * 0.045;
+  vec3 hor = mix(lut(mix(0.16, 0.45, away)) * 0.12, lut(0.68) * 0.6, pow(toward, 7.0));
+  vec3 c = mix(zen, hor, exp(-y * mix(6.0, 11.0, toward)));
+  float shadow = exp(-y / 0.06);
+  float belt = exp(-pow((y - 0.12) / 0.07, 2.0));
+  return c + away * (lut(0.6) * 0.6 * belt + lut(0.45) * 0.2 * shadow);
 }
 /** 空の地の色（太陽の円盤と雲を除く）。暈は太陽を中心に円く減衰させる。 */
 vec3 skyBase(vec3 d) {
@@ -293,7 +300,8 @@ float shoreZ(float x) {
 float sandH(vec2 xz) {
   float d = xz.y - shoreZ(xz.x);
   float h = SLOPE * d;
-  h += 1.5 * smoothstep(24.0, 46.0, d) * (0.62 + 0.38 * sin(xz.x * 0.07 + 1.3));
+  // 奥の砂丘。陸側を向いたとき、空の明るい帯を背にした稜線として読める高さまで盛る
+  h += 2.8 * smoothstep(19.0, 38.0, d) * (0.55 + 0.3 * sin(xz.x * 0.09 + 1.3) + 0.15 * sin(xz.x * 0.23 + 0.4));
   return h;
 }
 
@@ -396,8 +404,13 @@ vec3 sandLight(vec3 n) {
   vec3 amb = lut(0.28) * 0.3 + lut(0.7) * 0.32 * (0.35 + 0.65 * n.y);
   return amb + lut(0.97) * 2.2 * max(dot(n, uSun), 0.0);
 }
+/** 濡れた砂。乾いた砂を暗くしただけだと黄味が残ってオリーブに見えるので、赤茶に寄せる。 */
+vec3 wetAlbedo() {
+  return lut(0.5) * 0.3;
+}
 vec3 sandAlbedo() {
-  return lut(0.84) * 0.75;
+  // 黄寄りの琥珀は暗いところでオリーブに転ぶので、少し赤い琥珀にしておく
+  return lut(0.72) * 0.9;
 }
 `;
 
@@ -488,7 +501,7 @@ void main() {
 
   // 水の中。浅いところは砂が透け、崩れる前の薄い山は夕日に透ける
   float depth = max(h0 - sandH(xz), 0.0);
-  vec3 wetSand = sandAlbedo() * 0.4 * sandLight(vec3(0.0, 1.0, 0.0));
+  vec3 wetSand = wetAlbedo() * sandLight(vec3(0.0, 1.0, 0.0));
   vec3 deep = lut(0.05) * 0.035;
   vec3 body = mix(deep, wetSand, exp(-depth * 1.7));
   float back = pow(max(dot(-V, uSun), 0.0), 3.0);
@@ -497,7 +510,8 @@ void main() {
   vec3 col = (mix(body, refl, F) + lut(1.0) * glint) * (1.0 - 0.5 * min(face, 1.0));
   // 泡は空の明かりで淡く、太陽の光の道の上だけ夕日に透けて明るい
   float path = pow(max(dot(-V, uSun), 0.0), 30.0);
-  vec3 foamCol = lut(0.92) * (0.12 + 0.1 * N.y + 0.5 * path);
+  // 泡の色は黄寄りの琥珀にすると暗いところでカーキに濁るので、淡い薔薇寄りの琥珀にする
+  vec3 foamCol = lut(0.62) * (0.2 + 0.15 * N.y + 0.75 * path);
   col = mix(col, foamCol, foam);
 
   col = mix(col, hazeColor(-V), 1.0 - exp(-pow(dist / HAZE, 2.0)));
@@ -587,7 +601,9 @@ void main() {
 
   // 波の届く帯は、艶が消えても湿って暗い
   float damp = 1.0 - smoothstep(RUN * 0.55, RUN * 1.35, d);
-  vec3 alb = sandAlbedo() * mix(1.0, 0.3, max(damp * 0.75, gloss));
+  vec3 alb = mix(sandAlbedo(), wetAlbedo(), max(damp * 0.75, gloss));
+  // 奥の砂丘は一段暗い薔薇茶にして、手前の明るい浜と見分けられるようにする
+  alb = mix(alb, lut(0.5) * 0.45, smoothstep(18.0, 28.0, d) * 0.7);
 
   // 貝殻と小石。波の届く帯にまばらに散らばり、濡れると光る
   vec2 cp = xz * 2.2;
@@ -631,7 +647,7 @@ void main() {
   // 濡れた面には、太陽の方角へ伸びる幅の広い照り返しの帯が立つ
   col += lut(0.9) * pow(max(dot(R, uSun), 0.0), 40.0) * 0.6 * mirror;
 
-  vec3 foamCol = lut(0.9) * (0.2 + 0.16 * Nw.y);
+  vec3 foamCol = lut(0.62) * (0.34 + 0.26 * Nw.y);
   col = mix(col, foamCol, foam);
 
   col = mix(col, hazeColor(-V), 1.0 - exp(-pow(dist / HAZE, 2.0)));
@@ -704,7 +720,10 @@ const smoothstep = (a: number, b: number, x: number): number => {
 const shoreZ = (x: number): number => 0.9 * Math.sin(x * 0.045 + 0.6) + 0.35 * Math.sin(x * 0.13 + 2.0);
 function sandHeight(x: number, z: number): number {
   const d = z - shoreZ(x);
-  return SLOPE * d + 1.5 * smoothstep(24, 46, d) * (0.62 + 0.38 * Math.sin(x * 0.07 + 1.3));
+  return (
+    SLOPE * d +
+    2.8 * smoothstep(19, 38, d) * (0.55 + 0.3 * Math.sin(x * 0.09 + 1.3) + 0.15 * Math.sin(x * 0.23 + 0.4))
+  );
 }
 
 /** 毎回同じ浜になるよう、固定の漸化式で散らす。 */
@@ -762,7 +781,7 @@ function propMaterial(tone: number, alb: number, grain: number, sway = 0): THREE
  * 曲げは z にだけ入れて、両端を砂から浮かせない。
  */
 function buildLog(root: THREE.Group): void {
-  const mat = propMaterial(0.92, 0.55, 0.55);
+  const mat = propMaterial(0.9, 0.45, 0.55);
   const { x, z, len, r, yaw } = LOG;
   const cy = sandHeight(x, z) + r * 0.35;
   /** 幹の芯の横ずれ。y は -len/2（根元）〜 len/2（先）。 */
@@ -857,8 +876,8 @@ function buildGrass(root: THREE.Group): void {
   const tufts: [number, number][] = [];
   const rand = rng(0.2831);
   for (let i = 0; i < TUFTS_DUNE; i++) {
-    const x = -42 + rand() * 84;
-    tufts.push([x, shoreZ(x) + 17 + rand() * 16]);
+    const x = -30 + rand() * 60;
+    tufts.push([x, shoreZ(x) + 16 + rand() * 7]);
   }
 
   const mesh = new THREE.InstancedMesh(blade, propMaterial(0.42, 0.34, 0.3, 0.1), tufts.length * BLADES);
@@ -866,7 +885,7 @@ function buildGrass(root: THREE.Group): void {
   dummy.rotation.order = 'YXZ';
   let n = 0;
   for (const [tx, tz] of tufts) {
-    const size = 0.7 + rand() * 0.6;
+    const size = 1.2 + rand() * 0.8;
     for (let b = 0; b < BLADES; b++) {
       const a = rand() * Math.PI * 2;
       const rr = rand() * 0.22;
