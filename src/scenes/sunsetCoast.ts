@@ -230,6 +230,8 @@ float foamMask(float amt, vec2 uv, float dist) {
   if (amt < 0.02) return 0.0;
   float n = fbm3(uv * 0.45);
   float body = smoothstep(0.15, 1.1, amt * (0.55 + 0.9 * n));
+  // 網目は遠くでは見えないので、そこでは 9 セルの探索ごと省く
+  if (dist > 40.0) return body * 0.8;
   float net = 1.0 - smoothstep(0.0, 0.18 + 0.25 * min(amt, 1.0), lace(uv));
   net *= smoothstep(0.02, 0.4, amt) * (1.0 - smoothstep(12.0, 40.0, dist));
   return clamp(body * 0.8 + net * 0.14 * (1.0 - body), 0.0, 1.0);
@@ -346,6 +348,39 @@ vec4 crestK(vec2 xz, float k, float t) {
   return vec4(A * sh * sh, u, b, zRel);
 }
 
+/**
+ * crestK の高さと傾き。x = 高さ、yz = ∂h/∂x と ∂h/∂z。
+ * 山の断面（sech²）は式のまま微分し、x 方向は汀線と山の曲がりの傾きだけを拾う
+ * （振幅や崩れる位置の x 方向の変化はゆるやかなので無視してよい）。
+ * 差分で傾きを取ると高さの式を 3 回呼ぶことになるので、画素シェーダではこちらを使う。
+ */
+vec3 crestHG(vec2 xz, float k, float t) {
+  float s = shoreZ(xz.x);
+  float dist = CREST_C * (k * WAVE_T - t);
+  float bendW = clamp(dist / 25.0, 0.0, 1.0);
+  float zRel = -0.5 - dist + bendK(xz.x, k) * bendW;
+  float zb = breakZ(xz.x, k);
+  float b = smoothstep(zb, zb + 2.2, zRel);
+  float steep = smoothstep(zb - 14.0, zb, zRel);
+  float A = AMP * ampK(k) * (1.0 + 0.8 * steep);
+  A *= mix(1.0, 0.72, b);
+  A *= 1.0 - 0.6 * smoothstep(zb + 2.2, -1.0, zRel);
+  A *= 1.0 - smoothstep(-2.5, -0.5, zRel);
+  float u = xz.y - (s + zRel);
+  float wf = mix(mix(4.5, 1.2, steep), 0.6, b);
+  float wb = mix(mix(4.5, 3.2, steep), 6.0, b);
+  float w = u > 0.0 ? wf : wb;
+  float q = u / w;
+  if (abs(q) > 12.0) return vec3(0.0);
+  float sh = 1.0 / cosh(q);
+  float h = A * sh * sh;
+  float dhdu = -2.0 * h * tanh(q) / w;
+  float x = xz.x;
+  float dsdx = 0.0405 * cos(x * 0.045 + 0.6) + 0.0455 * cos(x * 0.13 + 2.0);
+  float dbend = (0.0608 * cos(x * 0.038 + k * 1.3) + 0.07 * cos(x * 0.1 - k * 0.7)) * bendW;
+  return vec3(h, -dhdu * (dsdx + dbend), dhdu);
+}
+
 /** その点を最後に通り過ぎた波の番号。これと次の 1 本だけを見れば足りる。 */
 float passedK(vec2 xz, float t) {
   float zp = xz.y - shoreZ(xz.x);
@@ -363,6 +398,22 @@ float seaH(vec2 xz, float t) {
     h += w.w * calm * sin(dot(w.xy, xz) - t * w.z);
   }
   return h;
+}
+
+/** 水面の高さと傾きを 1 回で。x = 高さ、yz = 傾き、w = うねりを除いた波の山だけの高さ。 */
+vec4 seaHG(vec2 xz, float t) {
+  float zp = xz.y - shoreZ(xz.x);
+  float kc = passedK(xz, t);
+  vec3 c = crestHG(xz, kc, t) + crestHG(xz, kc + 1.0, t);
+  vec4 f = vec4(c, c.x);
+  float calm = 1.0 - smoothstep(-12.0, -1.0, zp);
+  for (int i = 0; i < ${SWELL.length}; i++) {
+    vec4 w = SWELL[i];
+    float ph = dot(w.xy, xz) - t * w.z;
+    f.x += w.w * calm * sin(ph);
+    f.yz += w.w * calm * cos(ph) * w.xy;
+  }
+  return f;
 }
 
 /** 画素の法線に足すさざ波の傾き。遠いほど弱め、照り返しの広がりで代わりに受ける。 */
@@ -456,23 +507,26 @@ void main() {
   float dist = length(toCam);
   vec3 V = toCam / dist;
 
-  // 法線は頂点ではなく画素ごとに、高さの式から作り直す
-  float e = 0.05 + dist * 0.004;
-  float h0 = seaH(xz, t);
-  vec2 g = vec2(seaH(xz + vec2(e, 0.0), t) - h0, seaH(xz + vec2(0.0, e), t) - h0) / e;
-  g += rippleGrad(xz, t, dist, 1.0);
+  // 法線は頂点ではなく画素ごとに、高さの式とその傾きから作り直す
+  vec4 hg = seaHG(xz, t);
+  float h0 = hg.x;
+  vec2 g = hg.yz + rippleGrad(xz, t, dist, 1.0);
   vec3 N = normalize(vec3(-g.x, 1.0, -g.y));
 
   // 白波。崩れた面を転げ落ち、段の後ろへ網目になって広がりながら消えていく
   float s = shoreZ(xz.x);
   float kc = passedK(xz, t);
   float foam = 0.0;
-  float crestLift = 0.0;
+  // 崩れる線はどの波でも汀線から 20 単位より内側。それより沖は泡が出ないのでループごと省く。
+  // 夕日に透ける山の高さは、法線用に求めた山だけの高さを使う（ループの有無で途切れないように）
+  bool surf = xz.y - s > -22.0;
+  float crestLift = max(hg.w, 0.0);
   float face = 0.0;
-  for (int i = -1; i <= 1; i++) {
+  // 見るのは通り過ぎたばかりの波と次に来る波の 2 本。それより前の波の泡は 8 秒以上たって消えている
+  for (int i = 0; i <= 1; i++) {
+    if (!surf) break;
     float k = kc + float(i);
     vec4 c = crestK(xz, k, t);
-    crestLift = max(crestLift, c.x);
     if (c.z <= 0.0) continue;
     float zb = breakZ(xz.x, k);
     float age = max(c.w - zb, 0.0) / CREST_C;
@@ -484,7 +538,9 @@ void main() {
     float patchy = 0.3 + 1.2 * smoothstep(0.2, 0.8, vnoise(vec2(xz.x * 0.16 + k * 3.1, c.y * 0.12 + k)));
     float amt = c.z * front * trail * zone * patchy * exp(-age / 6.5) * 2.2;
     // 崩れる前の面の斜面。泡の手前（岸側）を暗くして、立ち上がった波に見せる
-    face = max(face, exp(-pow((c.y - 1.1) / 0.9, 2.0)) * smoothstep(0.0, 0.3, c.z + 0.3 * c.x) * patchy * 0.6);
+    // ループを省く境目で途切れないよう、その手前で 0 に落としておく
+    face = max(face, exp(-pow((c.y - 1.1) / 0.9, 2.0)) * smoothstep(0.0, 0.3, c.z + 0.3 * c.x) * patchy * 0.6
+      * smoothstep(-22.0, -17.0, xz.y - s));
     float drift = min(c.w, 0.0) * 0.55 + max(c.w, 0.0) * 0.1;
     vec2 uv = vec2(xz.x, xz.y - s - drift) * vec2(1.0, 1.25) + vec2(k * 17.3, k * 5.1);
     foam = max(foam, foamMask(amt, uv, dist));
@@ -556,14 +612,17 @@ void main() {
   float rp = xz.y * 15.0 + xz.x * 2.5 + vnoise(xz * 0.7) * 7.0 + vnoise(xz * 2.3) * 1.5;
   g.y += cos(rp) * 0.14 * dryZone * smoothstep(0.25, 0.65, vnoise(xz * 0.45 + 3.1));
 
-  // 直近 3 本の波の遡上を古い順に重ねる
+  // 直近 2 本の波の遡上を古い順に重ねる（その前の波の艶と泡は 16 秒以上たって 1 割未満に消えている）
   float cover = d < 0.0 ? 1.0 : 0.0;
   float sheet = max(-d, 0.0) * 0.06;
   float gloss = d < 0.0 ? 1.0 : 0.0;
   float foam = 0.0;
   float flow = 0.0;
   float k0 = floor(t / WAVE_T);
-  for (int i = 2; i >= 0; i--) {
+  // 遡上はどんなに大きな波でも汀線から RUN の 1.8 倍までしか届かない。乾いた砂と砂丘では省く
+  bool reach = d < RUN * 1.8;
+  for (int i = 1; i >= 0; i--) {
+    if (!reach) break;
     float k = k0 - float(i);
     float tau = t - k * WAVE_T;
     float rm = runMax(xz.x, k);
@@ -639,13 +698,16 @@ void main() {
   vec3 R = reflect(-V, Nw);
   R.y = abs(R.y);
   float F = fresnel(dot(Nw, V));
-  vec3 refl = sky(R);
   float mirror = max(cover, gloss * 0.75);
-  col = mix(col * mix(1.0, exp(-sheet * 6.0), cover), refl, F * mirror);
-  float shin = mix(160.0, 900.0, max(cover, shell * gloss));
-  col += lut(1.0) * pow(max(dot(R, uSun), 0.0), shin) * shin * 0.003 * mirror * ${f(SUN_GLINT)};
-  // 濡れた面には、太陽の方角へ伸びる幅の広い照り返しの帯が立つ
-  col += lut(0.9) * pow(max(dot(R, uSun), 0.0), 40.0) * 0.6 * mirror;
+  // 乾いた砂は空を映さない。映り込みが無いところでは空の計算ごと飛ばす
+  if (mirror > 0.003) {
+    vec3 refl = sky(R);
+    col = mix(col * mix(1.0, exp(-sheet * 6.0), cover), refl, F * mirror);
+    float shin = mix(160.0, 900.0, max(cover, shell * gloss));
+    col += lut(1.0) * pow(max(dot(R, uSun), 0.0), shin) * shin * 0.003 * mirror * ${f(SUN_GLINT)};
+    // 濡れた面には、太陽の方角へ伸びる幅の広い照り返しの帯が立つ
+    col += lut(0.9) * pow(max(dot(R, uSun), 0.0), 40.0) * 0.6 * mirror;
+  }
 
   vec3 foamCol = lut(0.62) * (0.34 + 0.26 * Nw.y);
   col = mix(col, foamCol, foam);
@@ -1021,7 +1083,7 @@ export const sunsetCoast: SceneModule = {
 
     // 海。近景だけ細かく割って波の高さへ持ち上げ、遠景は平らな板に画素の法線だけで波を描く
     const seaMat = material(SEA_FRAG, 1);
-    root.add(new THREE.Mesh(plane(80, 44, 220, 150, 0, -19), seaMat));
+    root.add(new THREE.Mesh(plane(80, 44, 160, 110, 0, -19), seaMat));
     root.add(new THREE.Mesh(plane(520, 220, 8, 8, 0, -151), seaMat));
     root.add(new THREE.Mesh(plane(220, 44, 8, 8, -150, -19), seaMat));
     root.add(new THREE.Mesh(plane(220, 44, 8, 8, 150, -19), seaMat));
